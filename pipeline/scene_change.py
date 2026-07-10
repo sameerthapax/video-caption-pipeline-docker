@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-import cv2
 import numpy as np
 
 from schemas.frames import SceneCandidateScore
@@ -41,6 +40,7 @@ def analyze_scene_changes(
     config: SceneSamplingConfig | None = None,
     weights: SceneScoreWeights | None = None,
 ) -> SceneChangeResult:
+    cv2 = _require_cv2()
     sampling = config or SceneSamplingConfig()
     _ = weights or SceneScoreWeights()
 
@@ -150,6 +150,7 @@ def _build_sample_timestamps(*, duration: float, interval_seconds: float) -> lis
 
 
 def _compute_histogram(frame: np.ndarray) -> np.ndarray:
+    cv2 = _require_cv2()
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     histogram = cv2.calcHist([hsv], [0, 1, 2], None, HISTOGRAM_BINS, [0, 180, 0, 256, 0, 256])
     cv2.normalize(histogram, histogram)
@@ -157,6 +158,7 @@ def _compute_histogram(frame: np.ndarray) -> np.ndarray:
 
 
 def _compute_grayscale(frame: np.ndarray) -> np.ndarray:
+    cv2 = _require_cv2()
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     return cv2.resize(gray, GRAYSCALE_SIZE, interpolation=cv2.INTER_AREA)
 
@@ -199,3 +201,11 @@ def _find_local_peaks(scores: list[float]) -> list[int]:
         if score > 0 and score >= previous_score and score >= next_score:
             peaks.append(index)
     return peaks
+
+
+def _require_cv2():
+    try:
+        import cv2
+    except ModuleNotFoundError as exc:  # pragma: no cover - runtime dependency
+        raise RuntimeError("opencv-python-headless is required for scene analysis.") from exc
+    return cv2

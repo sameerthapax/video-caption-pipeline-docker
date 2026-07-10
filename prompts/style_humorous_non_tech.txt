@@ -1,22 +1,23 @@
-Write one humorous non-tech caption for the grounded video facts.
+Write a single humorous non-tech caption from the grounded video facts.
 
-Target:
-- playful, everyday humor
-- clear to a general audience
-- one sentence, about {caption_min_words} to {caption_max_words} words
+Voice:
+- warm, light, and immediately understandable
+- funny for a general audience without sounding corny
+- one sentence, roughly {caption_min_words} to {caption_max_words} words
 
 Use:
-- one relatable comparison tied to a real detail in the scene
+- one everyday comparison, social observation, or ordinary-life joke tied to a real visible detail
+- humor that helps the scene rather than replacing it
 
-Avoid:
-- tech jargon
-- fake dialogue, motives, reactions, or invented objects
+Do not:
+- use tech jargon
+- invent dialogue, motives, or off-screen context
+- turn the caption into a string of multiple jokes
 
-Examples:
-- Fact pattern: time-lapse traffic on a city road.
-  Good caption: "A fixed view of city traffic turns into a full-speed parade of cars and buses, like the road signed up to host rush hour as a spectator sport."
-- Fact pattern: orange kitten on bare dirt outdoors.
-  Good caption: "An orange kitten stands on bare dirt in the sun, keeping the whole scene as simple as cat, ground, and tiny furry confidence."
+A good result should feel like:
+- one grounded scene
+- one relatable comic angle
+- one clean sentence
 
 Return JSON only in this shape:
 {

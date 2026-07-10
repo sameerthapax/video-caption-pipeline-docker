@@ -1,13 +1,11 @@
-  export interface Env {
-    FIREWORKS_API_KEY: string;
-    OPENAI_API_KEY: string;
-    GOOGLE_GEMINI_API_KEY: string;
-    PROXY_TOKEN: string;
-  }
+export interface Env {
+  OPENAI_API_KEY: string;
+  VISION_API_KEY: string;
+  PROXY_TOKEN: string;
+}
 
-  const FIREWORKS_BASE = "https://api.fireworks.ai/inference/v1";
-  const OPENAI_BASE = "https://api.openai.com/v1";
-  const GOOGLE_GEMINI_BASE = "https://generativelanguage.googleapis.com";
+const OPENAI_BASE = "https://api.openai.com/v1";
+const VISION_BASE = "https://generativelanguage.googleapis.com";
 
   function unauthorized() {
     return new Response("unauthorized", { status: 401 });
@@ -47,11 +45,34 @@
     const upstreamPath = url.pathname.replace(pathPrefix, "") || "/";
     const upstreamUrl = buildUpstreamUrl(targetBase, upstreamPath, url.search);
 
-    return fetch(upstreamUrl.toString(), {
+    const response = await fetch(upstreamUrl.toString(), {
       method: req.method,
       headers: filterHeaders(req, apiKey, authMode),
       body: req.method === "GET" || req.method === "HEAD" ? undefined : req.body,
       redirect: "follow",
+    });
+    return rewriteUploadUrlHeader(response, req, pathPrefix);
+  }
+
+  function rewriteUploadUrlHeader(response: Response, req: Request, pathPrefix: string) {
+    const upstreamUploadUrl = response.headers.get("x-goog-upload-url");
+    if (!upstreamUploadUrl) {
+      return response;
+    }
+
+    const requestUrl = new URL(req.url);
+    const upstreamUrl = new URL(upstreamUploadUrl);
+    upstreamUrl.protocol = requestUrl.protocol;
+    upstreamUrl.host = requestUrl.host;
+    upstreamUrl.pathname = `${pathPrefix}${upstreamUrl.pathname}`;
+
+    const headers = new Headers(response.headers);
+    headers.set("x-goog-upload-url", upstreamUrl.toString());
+
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
     });
   }
 
@@ -63,16 +84,12 @@
 
       const url = new URL(request.url);
 
-      if (url.pathname.startsWith("/fireworks")) {
-        return forward(request, FIREWORKS_BASE, env.FIREWORKS_API_KEY, "/fireworks", "bearer");
-      }
-
       if (url.pathname.startsWith("/openai")) {
         return forward(request, OPENAI_BASE, env.OPENAI_API_KEY, "/openai", "bearer");
       }
 
-      if (url.pathname.startsWith("/google")) {
-        return forward(request, GOOGLE_GEMINI_BASE, env.GOOGLE_GEMINI_API_KEY, "/google", "google_api_key");
+      if (url.pathname.startsWith("/vision")) {
+        return forward(request, VISION_BASE, env.VISION_API_KEY, "/vision", "google_api_key");
       }
 
       return new Response("ok", { status: 200 });

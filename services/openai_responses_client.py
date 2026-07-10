@@ -4,7 +4,10 @@ import json
 import logging
 from typing import Any
 
-import httpx
+try:
+    import httpx
+except ModuleNotFoundError:  # pragma: no cover - local test environments may not install runtime deps
+    httpx = None
 from pydantic import BaseModel
 
 from services.async_limits import get_loop_semaphore
@@ -39,6 +42,8 @@ class OpenAIResponsesConfig(BaseModel):
 class OpenAIResponsesClient:
     def __init__(self, config: OpenAIResponsesConfig) -> None:
         self.config = config
+        if httpx is None:
+            raise RuntimeError("httpx is required to use OpenAIResponsesClient.")
         self._client = httpx.AsyncClient(
             timeout=self.config.timeout_seconds,
             http2=True,
@@ -59,13 +64,19 @@ class OpenAIResponsesClient:
         *,
         model: str,
         prompt: str,
+        response_schema: dict[str, Any] | None = None,
+        response_schema_name: str = "response",
     ) -> dict[str, Any]:
         payload = {
             "model": model,
             "input": prompt,
-            "temperature": self.config.temperature,
-            "text": {"verbosity": self.config.text_verbosity},
+            "text": {
+                "verbosity": self.config.text_verbosity,
+                "format": _build_text_format(schema=response_schema, schema_name=response_schema_name),
+            },
         }
+        if self.config.reasoning_effort:
+            payload["reasoning"] = {"effort": self.config.reasoning_effort}
         return await self._request_json(payload=payload)
 
     async def _request_json(self, *, payload: dict[str, Any]) -> dict[str, Any]:
@@ -213,6 +224,9 @@ def _extract_json_object(payload: Any) -> dict[str, Any] | None:
 def _looks_like_caption_bundle(payload: dict[str, Any]) -> bool:
     captions = payload.get("captions")
     if not isinstance(captions, dict):
+        required_styles = {"formal", "sarcastic", "humorous_tech", "humorous_non_tech"}
+        if required_styles.intersection(payload.keys()):
+            return all(isinstance(payload.get(style_name), dict) for style_name in required_styles.intersection(payload.keys()))
         return _looks_like_caption_variant(payload)
     required_styles = {"formal", "sarcastic", "humorous_tech", "humorous_non_tech"}
     return required_styles.issubset(captions.keys())
@@ -230,3 +244,14 @@ def _truncate_json_payload(payload: Any, *, max_string_length: int = 2000) -> An
     if isinstance(payload, str) and len(payload) > max_string_length:
         return payload[:max_string_length] + "...<truncated>"
     return payload
+
+
+def _build_text_format(*, schema: dict[str, Any] | None, schema_name: str) -> dict[str, Any]:
+    if schema is None:
+        return {"type": "json_object"}
+    return {
+        "type": "json_schema",
+        "name": schema_name,
+        "schema": schema,
+        "strict": True,
+    }

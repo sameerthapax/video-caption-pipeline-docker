@@ -11,9 +11,18 @@ import stat
 from pathlib import Path
 from typing import Any
 
+from pipeline.caption_pipeline import CaptionPipeline
+from pipeline.normalize import normalize_video
+from pipeline.probe_video import probe_video_metadata
+from pipeline.transcription import load_or_create_transcript
+from schemas.caption import STYLE_ORDER, StyleName
+from services.client_pool import close_pooled_async_clients, get_openai_responses_client, get_vision_client
+from services.local_files import download_file, guess_video_suffix
+from services.process import ProcessExecutionError, run_command
+from worker.config.settings import settings
 
-DEFAULT_STYLE_ORDER = ("formal", "sarcastic", "humorous_tech", "humorous_non_tech")
-logger = logging.getLogger("video-caption-hackathon-agent")
+
+logger = logging.getLogger("video-caption-pipeline")
 
 
 @dataclass(slots=True)
@@ -34,24 +43,18 @@ def main() -> None:
         logger.info("Batch pipeline starting with input=%s output=%s", input_path, output_path)
         run(input_path=input_path, output_path=output_path)
     except Exception as exc:  # noqa: BLE001
-        logger.exception("Fatal startup failure. Writing fallback Track 2 results.")
-        fallback_results = _build_fallback_results(
-            raw_task_specs,
-            error=f"fatal startup failure: {exc}",
-        )
+        logger.exception("Fatal startup failure. Writing fallback results.")
+        fallback_results = _build_fallback_results(raw_task_specs, error=f"fatal startup failure: {exc}")
         try:
             _write_results(output_path, fallback_results)
         except Exception:  # noqa: BLE001
             logger.exception("Failed to write fallback results to %s", output_path)
     finally:
-        from services.client_pool import close_pooled_async_clients
-
         close_pooled_async_clients()
 
 
 def run(*, input_path: Path, output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
-
     tasks = _load_tasks(input_path)
     results = _process_tasks(tasks)
     _write_results(output_path, results)
@@ -59,21 +62,11 @@ def run(*, input_path: Path, output_path: Path) -> None:
 
 
 def _configure_logging_safe() -> None:
-    try:
-        from worker.runtime import configure_logging
-
-        log_path = configure_logging()
-        if log_path is not None:
-            logger.info("Pipeline logging initialized at %s", log_path)
-        else:
-            logger.info("Pipeline logging initialized with stderr-only output.")
-    except Exception as exc:  # noqa: BLE001
-        logging.basicConfig(
-            level=logging.INFO,
-            format="%(asctime)s %(levelname)s %(name)s %(message)s",
-            force=True,
-        )
-        logger.warning("Falling back to stderr-only logging: %s", exc)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+        force=True,
+    )
 
 
 def _load_tasks(tasks_path: Path) -> list[Any]:
@@ -81,26 +74,21 @@ def _load_tasks(tasks_path: Path) -> list[Any]:
 
     if not tasks_path.exists():
         raise FileNotFoundError(f"Input task file does not exist: {tasks_path}")
-
     payload = json.loads(tasks_path.read_text(encoding="utf-8"))
     if not isinstance(payload, list):
         raise ValueError("Input task file must contain a JSON array.")
-
     return [CaptionTask.model_validate(item) for item in payload]
 
 
 def _load_task_specs_best_effort(tasks_path: Path) -> list[TaskSpec]:
     if not tasks_path.exists():
         return []
-
     try:
         payload = json.loads(tasks_path.read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001
         return []
-
     if not isinstance(payload, list):
         return []
-
     task_specs: list[TaskSpec] = []
     for index, item in enumerate(payload):
         if not isinstance(item, dict):
@@ -115,42 +103,22 @@ def _load_task_specs_best_effort(tasks_path: Path) -> list[TaskSpec]:
 def _process_tasks(tasks: list[Any]) -> list[dict[str, Any]]:
     if not tasks:
         return []
-
-    from worker.config.settings import settings
-
     max_workers = max(1, settings.max_concurrent_jobs)
     logger.info("Processing %s task(s) with max_concurrent_jobs=%s", len(tasks), max_workers)
-
     if max_workers == 1 or len(tasks) == 1:
         return [_process_task(task) for task in tasks]
 
     ordered_results: list[dict[str, Any] | None] = [None] * len(tasks)
     with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="caption-task") as executor:
-        future_to_index = {
-            executor.submit(_process_task, task): index
-            for index, task in enumerate(tasks)
-        }
+        future_to_index = {executor.submit(_process_task, task): index for index, task in enumerate(tasks)}
         for future in as_completed(future_to_index):
-            index = future_to_index[future]
-            ordered_results[index] = future.result()
-
+            ordered_results[future_to_index[future]] = future.result()
     return [result for result in ordered_results if result is not None]
 
 
 def _process_task(task: Any) -> dict[str, Any]:
-    from pipeline.normalize import normalize_video
-    from pipeline.probe_video import probe_video_metadata
-    from pipeline.run_extraction_stage import run_video_extraction_stage
-    from pipeline.run_vlm_stage import run_vlm_reasoning_stage
-    from pipeline.style import style_captions
-    from services.client_pool import get_openai_responses_client
-    from services.local_files import download_file, guess_video_suffix
-    from services.process import ProcessExecutionError, run_command
-    from worker.config.settings import settings
-    from worker.runtime import log_stage, persist_debug_artifacts
-
     requested_styles = _normalize_requested_styles(getattr(task, "styles", []))
-    unsupported_styles = [style_name for style_name in requested_styles if style_name not in DEFAULT_STYLE_ORDER]
+    unsupported_styles = [style_name for style_name in requested_styles if style_name not in STYLE_ORDER]
     if unsupported_styles:
         return _build_task_result(
             task_id=str(task.task_id),
@@ -161,7 +129,7 @@ def _process_task(task: Any) -> dict[str, Any]:
             ),
         )
 
-    missing_dependencies = _missing_generation_dependencies(settings)
+    missing_dependencies = _missing_generation_dependencies()
     if missing_dependencies:
         return _build_task_result(
             task_id=str(task.task_id),
@@ -179,151 +147,57 @@ def _process_task(task: Any) -> dict[str, Any]:
 
     original_video_path = task_root / f"source{guess_video_suffix(str(task.video_url))}"
     normalized_video_path = task_root / "normalized.mp4"
-    normalized_audio_path = task_root / "normalized.wav"
-    artifacts_root = task_root / "artifacts"
-    debug_persist_artifacts = settings.debug_keep_temp
-
-    def extract_audio_if_present(*, video_path: Path, output_path: Path, has_audio: bool) -> str | None:
-        if not has_audio:
-            return None
-        try:
-            run_command(
-                args=[
-                    settings.ffmpeg_path,
-                    "-y",
-                    "-i",
-                    str(video_path),
-                    "-vn",
-                    "-ac",
-                    "1",
-                    "-ar",
-                    "24000",
-                    "-c:a",
-                    "pcm_s16le",
-                    str(output_path),
-                ],
-                timeout_seconds=settings.ffmpeg_timeout_seconds,
-            )
-        except ProcessExecutionError:
-            logger.warning("Audio extraction failed for %s; continuing without transcript audio.", video_path)
-            return None
-        return str(output_path)
-
-    def run_normalize_video_stage(*, task_id: str, source_video_path: Path, output_video_path: Path) -> Path:
-        with log_stage(logger, f"{task_id}:normalize_video"):
-            return normalize_video(
-                input_video_path=source_video_path,
-                output_video_path=output_video_path,
-            )
-
-    def run_extract_audio_stage(*, task_id: str, source_video_path: Path, output_audio_path: Path, has_audio: bool) -> str | None:
-        with log_stage(logger, f"{task_id}:extract_audio"):
-            return extract_audio_if_present(
-                video_path=source_video_path,
-                output_path=output_audio_path,
-                has_audio=has_audio,
-            )
-
-    def run_extraction_stage_sync(*, task_id: str, source_video_path: Path, local_audio_path: str | None) -> dict[str, Any]:
-        with log_stage(logger, f"{task_id}:extraction_stage"):
-            return asyncio.run(
-                run_video_extraction_stage(
-                    job_id=str(task.task_id),
-                    local_video_path=str(source_video_path),
-                    local_audio_path=local_audio_path,
-                    artifacts_root=str(artifacts_root),
-                    persist_artifacts=debug_persist_artifacts,
-                )
-            )
-
-    async def run_caption_generation(*, task_id: str, global_summary):
-        return await style_captions(
-            client=get_openai_responses_client(),
-            model=settings.openai_final_caption_model,
-            job_id=str(task.task_id),
-            global_summary=global_summary,
-            artifact_root=artifacts_root,
-            persist_artifacts=debug_persist_artifacts,
-        )
+    audio_path = task_root / "audio.wav"
+    transcript_dir = task_root / "transcripts"
+    artifact_root = task_root / "artifacts"
 
     try:
-        with log_stage(logger, f"{task.task_id}:download_video"):
-            download_file(url=str(task.video_url), destination=original_video_path)
-        with log_stage(logger, f"{task.task_id}:probe_original_video"):
-            original_metadata = probe_video_metadata(original_video_path)
+        download_file(url=str(task.video_url), destination=original_video_path)
+        original_metadata = probe_video_metadata(original_video_path)
         _validate_video_constraints(
             task_id=str(task.task_id),
             video_path=original_video_path,
             duration=original_metadata.duration,
-            max_video_size_mb=settings.max_video_size_mb,
-            max_video_duration_seconds=settings.max_video_duration_seconds,
         )
+
         analysis_video_path = original_video_path
-        local_audio_path: str | None = None
-        extraction_artifacts: dict[str, Any] | None = None
         if settings.enable_video_normalization:
-            with log_stage(logger, f"{task.task_id}:preprocess_media"):
-                with ThreadPoolExecutor(max_workers=2, thread_name_prefix=f"{task.task_id}-preprocess") as executor:
-                    normalize_future = executor.submit(
-                        run_normalize_video_stage,
-                        task_id=str(task.task_id),
-                        source_video_path=original_video_path,
-                        output_video_path=normalized_video_path,
-                    )
-                    extract_audio_future = executor.submit(
-                        run_extract_audio_stage,
-                        task_id=str(task.task_id),
-                        source_video_path=original_video_path,
-                        output_audio_path=normalized_audio_path,
-                        has_audio=original_metadata.has_audio,
-                    )
-                    analysis_video_path = normalize_future.result()
-                    local_audio_path = extract_audio_future.result()
-            extraction_artifacts = run_extraction_stage_sync(
-                task_id=str(task.task_id),
-                source_video_path=analysis_video_path,
-                local_audio_path=local_audio_path,
+            analysis_video_path = normalize_video(
+                input_video_path=original_video_path,
+                output_video_path=normalized_video_path,
             )
-        else:
-            with ThreadPoolExecutor(max_workers=2, thread_name_prefix=f"{task.task_id}-prepare") as executor:
-                extraction_future = executor.submit(
-                    run_extraction_stage_sync,
-                    task_id=str(task.task_id),
-                    source_video_path=analysis_video_path,
-                    local_audio_path=None,
-                )
-                audio_future = executor.submit(
-                    run_extract_audio_stage,
-                    task_id=str(task.task_id),
-                    source_video_path=original_video_path,
-                    output_audio_path=normalized_audio_path,
-                    has_audio=original_metadata.has_audio,
-                )
-                extraction_artifacts = extraction_future.result()
-                local_audio_path = audio_future.result()
-            extraction_artifacts["local_audio_path"] = local_audio_path or ""
-        with log_stage(logger, f"{task.task_id}:reasoning_stage"):
-            reasoning_artifacts = asyncio.run(
-                run_vlm_reasoning_stage(
-                    job_id=str(task.task_id),
-                    temporal_segments=extraction_artifacts["temporal_segments"],
-                    local_audio_path=local_audio_path,
-                    artifacts_root=str(artifacts_root),
-                    persist_artifacts=debug_persist_artifacts,
-                )
+        analysis_metadata = probe_video_metadata(analysis_video_path)
+
+        local_audio_path = _extract_audio_if_present(
+            video_path=analysis_video_path,
+            output_path=audio_path,
+            has_audio=analysis_metadata.has_audio,
+        )
+        transcript_path = _download_optional_transcript(task=task, task_root=task_root)
+        transcript_text = load_or_create_transcript(
+            task_id=str(task.task_id),
+            provided_transcript_text=str(getattr(task, "transcript_text", "") or ""),
+            transcript_source_path=transcript_path,
+            audio_path=Path(local_audio_path) if local_audio_path else None,
+            transcript_dir=transcript_dir,
+        )
+
+        pipeline = CaptionPipeline(
+            vision_client=get_vision_client(),
+            openai_client=get_openai_responses_client(),
+            artifact_root=artifact_root,
+            persist_artifacts=settings.debug_keep_temp,
+        )
+        result = asyncio.run(
+            pipeline.run(
+                job_id=str(task.task_id),
+                video_path=analysis_video_path,
+                video_metadata=analysis_metadata,
+                transcript_text=transcript_text,
+                requested_styles=[style_name for style_name in requested_styles if style_name in STYLE_ORDER],
             )
-        with log_stage(logger, f"{task.task_id}:caption_generation"):
-            final_result, local_final_result_path = asyncio.run(
-                run_caption_generation(
-                    task_id=str(task.task_id),
-                    global_summary=reasoning_artifacts["global_summary"],
-                )
-            )
-        if local_final_result_path:
-            logger.info("Task %s completed. Final artifact at %s", task.task_id, local_final_result_path)
-        else:
-            logger.info("Task %s completed.", task.task_id)
-        captions = {style_name: final_result.captions[style_name].caption for style_name in requested_styles}
+        )
+        captions = {style_name: result["captions"][style_name].caption for style_name in requested_styles}
         return _build_task_result(task_id=str(task.task_id), captions=captions)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Task %s failed. Falling back to safe captions.", task.task_id)
@@ -337,46 +211,66 @@ def _process_task(task: Any) -> dict[str, Any]:
         )
     finally:
         if settings.debug_keep_temp:
-            persist_debug_artifacts(
-                task_id=str(task.task_id),
-                original_video_path=original_video_path,
-                normalized_video_path=analysis_video_path if analysis_video_path.exists() else normalized_video_path,
-                normalized_audio_path=normalized_audio_path if normalized_audio_path.exists() else None,
-                artifacts_root=artifacts_root,
-            )
             logger.info("Keeping task temp directory at %s", task_root)
         else:
             shutil.rmtree(task_root, ignore_errors=True)
 
 
-def _missing_generation_dependencies(settings: Any) -> list[str]:
+def _extract_audio_if_present(*, video_path: Path, output_path: Path, has_audio: bool) -> str | None:
+    if not has_audio:
+        return None
+    try:
+        run_command(
+            args=[
+                settings.ffmpeg_path,
+                "-y",
+                "-i",
+                str(video_path),
+                "-vn",
+                "-ac",
+                "1",
+                "-ar",
+                "16000",
+                "-c:a",
+                "pcm_s16le",
+                str(output_path),
+            ],
+            timeout_seconds=settings.ffmpeg_timeout_seconds,
+        )
+    except ProcessExecutionError:
+        logger.warning("Audio extraction failed for %s; continuing without transcript audio.", video_path)
+        return None
+    return str(output_path)
+
+
+def _download_optional_transcript(*, task: Any, task_root: Path) -> Path | None:
+    transcript_url = getattr(task, "transcript_url", None)
+    if not transcript_url:
+        return None
+    transcript_path = task_root / "transcript.txt"
+    download_file(url=str(transcript_url), destination=transcript_path)
+    return transcript_path
+
+
+def _missing_generation_dependencies() -> list[str]:
     missing: list[str] = []
-    if not settings.google_gemini_api_key and not settings.google_gemini_proxy_url:
-        missing.append("GOOGLE_GEMINI_API_KEY or GOOGLE_GEMINI_PROXY_URL")
-    if not settings.google_gemini_vision_model:
-        missing.append("GOOGLE_GEMINI_VISION_MODEL")
-    if not settings.openai_api_key and not settings.openai_proxy_url:
-        missing.append("OPENAI_API_KEY or OPENAI_PROXY_URL")
+    if not settings.vision_proxy_url and not settings.vision_api_key:
+        missing.append("VISION_PROXY_URL or VISION_API_KEY")
+    if not settings.vision_model:
+        missing.append("VISION_MODEL")
+    if not settings.openai_proxy_url and not settings.openai_api_key:
+        missing.append("OPENAI_PROXY_URL or OPENAI_API_KEY")
+    if not settings.openai_caption_model:
+        missing.append("OPENAI_CAPTION_MODEL")
     return missing
 
 
-def _validate_video_constraints(
-    *,
-    task_id: str,
-    video_path: Path,
-    duration: float,
-    max_video_size_mb: int,
-    max_video_duration_seconds: int,
-) -> None:
+def _validate_video_constraints(*, task_id: str, video_path: Path, duration: float) -> None:
     size_mb = video_path.stat().st_size / (1024 * 1024)
-    if size_mb > max_video_size_mb:
-        raise ValueError(
-            f"Task {task_id} exceeds max input size: {size_mb:.1f}MB > {max_video_size_mb}MB"
-        )
-    if duration > max_video_duration_seconds:
-        raise ValueError(
-            f"Task {task_id} exceeds max duration: {duration:.1f}s > {max_video_duration_seconds}s"
-        )
+    if size_mb > settings.max_video_size_mb:
+        raise ValueError(f"Task {task_id} exceeds max input size: {size_mb:.1f}MB > {settings.max_video_size_mb}MB")
+    if duration > settings.max_video_duration_seconds:
+        raise ValueError(f"Task {task_id} exceeds max duration: {duration:.1f}s > {settings.max_video_duration_seconds}s")
 
 
 def _build_fallback_results(task_specs: list[TaskSpec], *, error: str) -> list[dict[str, Any]]:
@@ -394,16 +288,11 @@ def _build_fallback_results(task_specs: list[TaskSpec], *, error: str) -> list[d
 
 
 def _build_task_result(*, task_id: str, captions: dict[str, str]) -> dict[str, Any]:
-    return {
-        "task_id": task_id,
-        "captions": captions,
-    }
+    return {"task_id": task_id, "captions": captions}
 
 
 def _build_fallback_captions(*, task_id: str, requested_styles: list[str], error: str) -> dict[str, str]:
-    base = (
-        "The video could not be fully analyzed, so this caption stays conservative and avoids inventing details."
-    )
+    base = "The video could not be fully analyzed, so this caption stays conservative and avoids inventing details."
     default_templates = {
         "formal": f"{base} Task {task_id} requires manual review.",
         "sarcastic": f"{base} Apparently the clip chose mystery mode and declined to cooperate.",
@@ -430,7 +319,7 @@ def _normalize_requested_styles(value: Any) -> list[str]:
             if style_name and style_name not in requested_styles:
                 requested_styles.append(style_name)
     if not requested_styles:
-        requested_styles = list(DEFAULT_STYLE_ORDER)
+        requested_styles = list(STYLE_ORDER)
     return requested_styles
 
 
@@ -443,15 +332,25 @@ def _write_results(output_path: Path, results: list[dict[str, Any]]) -> None:
         temp_path.replace(output_path)
         return
     except PermissionError:
+        # Some Docker-mounted output volumes allow writes but reject atomic replace.
         _make_path_writable(output_path.parent)
         _make_path_writable(output_path)
         try:
-            if output_path.exists() and output_path.is_file():
-                output_path.unlink()
-        except OSError:
-            pass
-        temp_path.write_text(payload, encoding="utf-8")
-        temp_path.replace(output_path)
+            output_path.write_text(payload, encoding="utf-8")
+            try:
+                if temp_path.exists():
+                    temp_path.unlink()
+            except OSError:
+                pass
+            return
+        except PermissionError:
+            try:
+                if output_path.exists() and output_path.is_file():
+                    output_path.unlink()
+            except OSError:
+                pass
+            temp_path.write_text(payload, encoding="utf-8")
+            temp_path.replace(output_path)
 
 
 def _make_path_writable(path: Path) -> None:
