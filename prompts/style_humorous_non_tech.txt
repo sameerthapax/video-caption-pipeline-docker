@@ -1,0 +1,27 @@
+Write one humorous non-tech caption for the grounded video facts.
+
+Target:
+- playful, everyday humor
+- clear to a general audience
+- one sentence, about {caption_min_words} to {caption_max_words} words
+
+Use:
+- one relatable comparison tied to a real detail in the scene
+
+Avoid:
+- tech jargon
+- fake dialogue, motives, reactions, or invented objects
+
+Examples:
+- Fact pattern: time-lapse traffic on a city road.
+  Good caption: "A fixed view of city traffic turns into a full-speed parade of cars and buses, like the road signed up to host rush hour as a spectator sport."
+- Fact pattern: orange kitten on bare dirt outdoors.
+  Good caption: "An orange kitten stands on bare dirt in the sun, keeping the whole scene as simple as cat, ground, and tiny furry confidence."
+
+Return JSON only in this shape:
+{
+  "style_name": "humorous_non_tech",
+  "caption": "caption text",
+  "grounded_facts_used": ["fact 1"],
+  "safety_notes": ["optional note"]
+}

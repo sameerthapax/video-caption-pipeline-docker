@@ -4,20 +4,27 @@ from schemas.frames import FrameArtifact
 from schemas.segments import SamplingConfig, TemporalSegment, TemporalSegmentsArtifact
 from schemas.transcription import TranscriptChunk
 from schemas.video import VideoMetadata
+from worker.config.settings import settings
 
 
-def build_segment_boundaries(duration: float, segment_count: int = 5) -> list[tuple[float, float, str]]:
+def build_segment_boundaries(duration: float, segment_count: int | None = None) -> list[tuple[float, float, str]]:
+    if segment_count is None:
+        segment_count = settings.pipeline_segment_count
     if duration <= 0 or segment_count <= 0:
         return []
     boundaries: list[tuple[float, float, str]] = []
     for index in range(segment_count):
         start = round(duration * (index / segment_count), 4)
         end = round(duration if index == segment_count - 1 else duration * ((index + 1) / segment_count), 4)
-        boundaries.append((start, end, f"{index * 20}-{(index + 1) * 20}"))
+        percent_start = int(round(index * 100 / segment_count))
+        percent_end = int(round((index + 1) * 100 / segment_count))
+        boundaries.append((start, end, f"{percent_start}-{percent_end}"))
     return boundaries
 
 
-def assign_frames_to_segments(*, frames: list[FrameArtifact], duration: float, segment_count: int = 5) -> list[list[FrameArtifact]]:
+def assign_frames_to_segments(*, frames: list[FrameArtifact], duration: float, segment_count: int | None = None) -> list[list[FrameArtifact]]:
+    if segment_count is None:
+        segment_count = settings.pipeline_segment_count
     buckets = [[] for _ in range(segment_count)]
     boundaries = build_segment_boundaries(duration, segment_count)
     for frame in frames:
@@ -33,8 +40,10 @@ def assign_transcript_chunks_to_segments(
     *,
     transcript_chunks: list[TranscriptChunk],
     duration: float,
-    segment_count: int = 5,
+    segment_count: int | None = None,
 ) -> list[list[TranscriptChunk]]:
+    if segment_count is None:
+        segment_count = settings.pipeline_segment_count
     buckets = [[] for _ in range(segment_count)]
     boundaries = build_segment_boundaries(duration, segment_count)
     for chunk in transcript_chunks:
@@ -51,13 +60,16 @@ def build_temporal_segments_artifact(
     sampling_config: SamplingConfig,
     frames: list[FrameArtifact],
     transcript_chunks: list[TranscriptChunk],
+    segment_count: int | None = None,
 ) -> TemporalSegmentsArtifact:
-    boundaries = build_segment_boundaries(video_metadata.duration, 5)
-    frame_buckets = assign_frames_to_segments(frames=frames, duration=video_metadata.duration, segment_count=5)
+    if segment_count is None:
+        segment_count = settings.pipeline_segment_count
+    boundaries = build_segment_boundaries(video_metadata.duration, segment_count)
+    frame_buckets = assign_frames_to_segments(frames=frames, duration=video_metadata.duration, segment_count=segment_count)
     transcript_buckets = assign_transcript_chunks_to_segments(
         transcript_chunks=transcript_chunks,
         duration=video_metadata.duration,
-        segment_count=5,
+        segment_count=segment_count,
     )
     segments = [
         TemporalSegment(
@@ -76,4 +88,3 @@ def build_temporal_segments_artifact(
         sampling_config=sampling_config,
         segments=segments,
     )
-

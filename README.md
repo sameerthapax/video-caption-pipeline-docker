@@ -2,7 +2,7 @@
 
 A containerized video understanding and caption generation pipeline for short-form clips.
 
-The system downloads each input video, normalizes it, samples representative frames, optionally transcribes audio, performs segment-level visual reasoning, builds a global factual summary, and finally generates caption variants in multiple tones.
+The system downloads each input video, normalizes it, samples a compact set of representative frames, optionally transcribes audio, builds a verified factual summary, and then generates caption variants in multiple tones.
 
 It is designed to be:
 
@@ -15,12 +15,12 @@ It is designed to be:
 
 For every task in `/input/tasks.json`, the pipeline returns a caption bundle in `/output/results.json`.
 
-Each caption is grounded in a two-layer reasoning flow:
+Each caption is grounded in a two-step flow:
 
-- Segment VLM analysis: frame-based reasoning for each temporal segment
-- Global factual summary: a final image-backed fact synthesis across the whole clip
+- Verified visual summary: Fireworks creates and then verifies one compact factual description against the sampled frames
+- Style-specific caption generation: OpenAI writes one caption per requested style from that verified summary
 
-The final captions are generated from that factual summary, not directly from the raw video.
+The final captions are generated from the verified summary, not directly from the raw video.
 
 ## Pipeline Overview
 
@@ -32,11 +32,10 @@ High-level flow:
 2. Probe the original media
 3. Preprocess in parallel
 4. Extract representative frames
-5. Build temporal segments
-6. Run transcript and visual reasoning branches in parallel
-7. Merge segment evidence into video memory
-8. Generate a global factual summary with frames
-9. Generate final caption variants
+5. Build a small evidence set with dynamic frame counts
+6. Optionally transcribe audio
+7. Generate and verify one global factual summary with frames
+8. Generate final caption variants with separate prompts
 10. Write outputs and debug artifacts
 
 ## Stage Breakdown
@@ -63,11 +62,11 @@ The pipeline does not extract every frame.
 
 Instead, it builds a compact evidence set from:
 
-- uniform timestamps across the video
-- safety timestamps
-- scene-change candidates
+- a few uniform timestamps across the video
+- a few safety timestamps
+- top scene-change candidates
 
-Those timestamps are deduplicated and then extracted as JPEG frames.
+The total frame count is reduced dynamically by clip duration so short clips stay cheap and long clips still keep enough visual coverage.
 
 Relevant code:
 
@@ -95,71 +94,39 @@ Relevant code:
 - [services/google_gemini_client.py](/Users/sams/Desktop/video-caption-pipeline-docker/services/google_gemini_client.py:1)
 - [pipeline/run_vlm_stage.py](/Users/sams/Desktop/video-caption-pipeline-docker/pipeline/run_vlm_stage.py:19)
 
-### 5. Segment VLM Reasoning
+### 5. Verified Global Summary
 
-Each temporal segment is analyzed with:
+The default path is intentionally simpler than the earlier segment-heavy pipeline:
 
-- selected frames from that segment
-- accumulated video memory from earlier segments
-- transcript chunks for the segment when available
+- Fireworks writes one compact factual summary from the sampled frames
+- Fireworks verifies that draft against the same frames and removes unsupported detail
+- transcript text is included only as supporting evidence when available
 
-This stage produces structured segment-level visual reasoning, continuity updates, and memory updates for downstream summarization.
-
-Relevant code:
-
-- [pipeline/vlm_reasoning.py](/Users/sams/Desktop/video-caption-pipeline-docker/pipeline/vlm_reasoning.py:1)
-- [prompts/segment_vlm_prompt.py](/Users/sams/Desktop/video-caption-pipeline-docker/prompts/segment_vlm_prompt.py:1)
-- [schemas/vlm.py](/Users/sams/Desktop/video-caption-pipeline-docker/schemas/vlm.py:1)
-
-### 6. Deterministic Segment Fusion
-
-Per-segment fusion is no longer a separate model call.
-
-The pipeline deterministically combines:
-
-- transcript evidence
-- structured segment VLM output
-- continuity fields
-
-into `segment_ground_truth` for each segment.
-
-Relevant code:
-
-- [pipeline/global_summary.py](/Users/sams/Desktop/video-caption-pipeline-docker/pipeline/global_summary.py:55)
-
-### 7. Global Factual Summary
-
-The global factual summary is the final fact-generation step.
-
-It uses:
-
-- accumulated video memory
-- segment reasoning outputs
-- fused temporal segment ground truth
-- transcript chunks
-- segment frame metadata
-- the actual extracted frames
-
-This is intentionally still image-backed.
+This keeps the processing fast while still grounding the caption stage in checked facts.
 
 Relevant code:
 
 - [pipeline/global_summary.py](/Users/sams/Desktop/video-caption-pipeline-docker/pipeline/global_summary.py:13)
 - [prompts/global_summary_prompt.py](/Users/sams/Desktop/video-caption-pipeline-docker/prompts/global_summary_prompt.py:8)
 
-### 8. Caption Generation
+### 6. Caption Generation
 
-The factual summary is passed to the final caption generator, which creates:
+The verified summary is passed to the final caption generator, which creates:
 
 - `formal`
 - `sarcastic`
 - `humorous_tech`
 - `humorous_non_tech`
 
+Each style uses its own prompt file so the tones are separated more aggressively without asking one model response to balance all four at once.
+
 Relevant code:
 
 - [pipeline/style.py](/Users/sams/Desktop/video-caption-pipeline-docker/pipeline/style.py:1)
-- [prompts/final_caption_prompt.py](/Users/sams/Desktop/video-caption-pipeline-docker/prompts/final_caption_prompt.py:1)
+- [prompts/style_formal.txt](/Users/sams/Desktop/video-caption-pipeline-docker/prompts/style_formal.txt:1)
+- [prompts/style_sarcastic.txt](/Users/sams/Desktop/video-caption-pipeline-docker/prompts/style_sarcastic.txt:1)
+- [prompts/style_humorous_tech.txt](/Users/sams/Desktop/video-caption-pipeline-docker/prompts/style_humorous_tech.txt:1)
+- [prompts/style_humorous_non_tech.txt](/Users/sams/Desktop/video-caption-pipeline-docker/prompts/style_humorous_non_tech.txt:1)
 - [services/openai_responses_client.py](/Users/sams/Desktop/video-caption-pipeline-docker/services/openai_responses_client.py:1)
 
 ## Concurrency Model
@@ -171,6 +138,7 @@ The pipeline uses concurrency in a few important places:
 - transcript generation and visual reasoning run in parallel
 - Gemini requests are concurrency-limited
 - Fireworks requests are concurrency-limited
+- OpenAI caption requests reuse a pooled HTTP/2 client
 - ffmpeg subprocesses are globally bounded
 
 Key settings live in [worker/config/settings.py](/Users/sams/Desktop/video-caption-pipeline-docker/worker/config/settings.py:1).
@@ -180,8 +148,10 @@ Key settings live in [worker/config/settings.py](/Users/sams/Desktop/video-capti
 Build:
 
 ```bash
-docker build -t video-caption-hackathon .
+docker buildx build --platform linux/amd64 -t video-caption-hackathon .
 ```
+
+The judging VM pulls `linux/amd64`. If you build on Apple Silicon (`arm64`), keep the `--platform linux/amd64` flag or push a multi-arch image that includes an `amd64` manifest. Standard native `linux/amd64` builds on Intel, AMD, or CI are already compatible.
 
 Run:
 
@@ -192,7 +162,23 @@ docker run --rm \
   video-caption-hackathon
 ```
 
-No `--env-file` flag is required because the image can embed `.env.hackathon` at build time. Runtime environment variables still override embedded values.
+The image now ships with baked proxy defaults for:
+
+- `FIREWORKS_PROXY_URL`
+- `OPENAI_PROXY_URL`
+- `FIREWORKS_PROXY_TOKEN`
+- `OPENAI_PROXY_TOKEN`
+
+Runtime environment variables still override the baked values if you need to swap Workers, tokens, or URLs.
+For the hackathon submission flow, provider API keys remain in Cloudflare Worker secrets while the image contains the Worker URLs and shared proxy tokens.
+
+Track 2 runs this image as a batch job, not a server. On startup it reads `/input/tasks.json`, writes `/output/results.json`, and exits. If required external API keys are missing or a task fails during processing, the container still writes a valid `results.json` with conservative fallback captions instead of failing before output.
+
+Local smoke test:
+
+```bash
+bash scripts/smoke_test_track2.sh
+```
 
 ## Input Format
 

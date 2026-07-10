@@ -55,8 +55,21 @@ def analyze_scene_changes(
     raw_pixel: list[float] = []
 
     try:
-        for timestamp in timestamps:
-            frame = _read_frame(capture=capture, timestamp=timestamp)
+        fps = float(capture.get(cv2.CAP_PROP_FPS) or 0.0)
+        if fps <= 0:
+            raise RuntimeError(f"Unable to determine FPS for scene scanning: {video_path}")
+
+        target_frames = [max(0, int(round(timestamp * fps))) for timestamp in timestamps]
+        frame_index = 0
+        target_index = 0
+        while target_index < len(target_frames):
+            ok, frame = capture.read()
+            if not ok or frame is None:
+                raise RuntimeError(f"Failed to read frame near {timestamps[target_index]:.2f}s")
+            if frame_index < target_frames[target_index]:
+                frame_index += 1
+                continue
+
             histogram = _compute_histogram(frame)
             gray = _compute_grayscale(frame)
             if previous_histogram is None or previous_gray is None:
@@ -67,6 +80,8 @@ def analyze_scene_changes(
                 raw_pixel.append(float(np.mean(np.abs(gray.astype(np.float32) - previous_gray.astype(np.float32))) / 255.0))
             previous_histogram = histogram
             previous_gray = gray
+            target_index += 1
+            frame_index += 1
     finally:
         capture.release()
 
@@ -134,14 +149,6 @@ def _build_sample_timestamps(*, duration: float, interval_seconds: float) -> lis
     return timestamps
 
 
-def _read_frame(*, capture: cv2.VideoCapture, timestamp: float) -> np.ndarray:
-    capture.set(cv2.CAP_PROP_POS_MSEC, max(timestamp, 0.0) * 1000.0)
-    ok, frame = capture.read()
-    if not ok or frame is None:
-        raise RuntimeError(f"Failed to read frame at {timestamp:.2f}s")
-    return frame
-
-
 def _compute_histogram(frame: np.ndarray) -> np.ndarray:
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     histogram = cv2.calcHist([hsv], [0, 1, 2], None, HISTOGRAM_BINS, [0, 180, 0, 256, 0, 256])
@@ -192,4 +199,3 @@ def _find_local_peaks(scores: list[float]) -> list[int]:
         if score > 0 and score >= previous_score and score >= next_score:
             peaks.append(index)
     return peaks
-

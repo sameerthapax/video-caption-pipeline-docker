@@ -1,19 +1,19 @@
 from __future__ import annotations
 
+import io
 import math
+import wave
 from dataclasses import dataclass
 from pathlib import Path
 
 from schemas.transcription import TranscriptChunk
-from services.process import run_command
-from worker.config.settings import settings
 
 
 @dataclass(frozen=True)
-class AudioWindowFile:
+class AudioWindowChunk:
     start: float
     end: float
-    path: Path
+    audio_bytes: bytes
     mime_type: str = "audio/wav"
 
 
@@ -29,42 +29,39 @@ def build_transcript_windows(duration: float, window_seconds: float = 5.0) -> li
     return windows
 
 
-def extract_audio_window_files(
+def extract_audio_window_chunks(
     *,
     source_audio_path: Path,
-    output_dir: Path,
     transcript_windows: list[TranscriptChunk],
-) -> list[AudioWindowFile]:
+) -> list[AudioWindowChunk]:
     if not transcript_windows:
         return []
-    output_dir.mkdir(parents=True, exist_ok=True)
-    output_pattern = output_dir / "window_%03d.wav"
-    run_command(
-        args=[
-            settings.ffmpeg_path,
-            "-y",
-            "-i",
-            str(source_audio_path),
-            "-f",
-            "segment",
-            "-segment_time",
-            "5",
-            "-ac",
-            "1",
-            "-ar",
-            "24000",
-            "-c:a",
-            "pcm_s16le",
-            str(output_pattern),
-        ],
-        timeout_seconds=settings.ffmpeg_timeout_seconds,
-    )
-    output_files = sorted(output_dir.glob("window_*.wav"))
-    if len(output_files) < len(transcript_windows):
-        raise RuntimeError(
-            f"Expected at least {len(transcript_windows)} transcript audio windows, found {len(output_files)}."
+    with wave.open(str(source_audio_path), "rb") as source_wav:
+        frame_rate = source_wav.getframerate()
+        sample_width = source_wav.getsampwidth()
+        channel_count = source_wav.getnchannels()
+        frame_count = source_wav.getnframes()
+        source_frames = source_wav.readframes(frame_count)
+
+    chunks: list[AudioWindowChunk] = []
+    bytes_per_frame = sample_width * channel_count
+    for window in transcript_windows:
+        start_frame = min(frame_count, max(0, int(window.start * frame_rate)))
+        end_frame = min(frame_count, max(start_frame, int(math.ceil(window.end * frame_rate))))
+        start_byte = start_frame * bytes_per_frame
+        end_byte = end_frame * bytes_per_frame
+
+        buffer = io.BytesIO()
+        with wave.open(buffer, "wb") as window_wav:
+            window_wav.setnchannels(channel_count)
+            window_wav.setsampwidth(sample_width)
+            window_wav.setframerate(frame_rate)
+            window_wav.writeframes(source_frames[start_byte:end_byte])
+        chunks.append(
+            AudioWindowChunk(
+                start=window.start,
+                end=window.end,
+                audio_bytes=buffer.getvalue(),
+            )
         )
-    return [
-        AudioWindowFile(start=window.start, end=window.end, path=output_files[index])
-        for index, window in enumerate(transcript_windows)
-    ]
+    return chunks

@@ -1,0 +1,29 @@
+Write one formal caption for the grounded video facts.
+
+Target:
+- neutral, polished, descriptive
+- not chatty, not cute, not dramatic
+- one sentence, about {caption_min_words} to {caption_max_words} words
+
+Use:
+- the clearest grounded subject, setting, and action
+- conservative wording when the facts are incomplete
+
+Avoid:
+- jokes, sarcasm, slang
+- invented motives, emotions, dialogue, or identities
+- repeating every tiny detail
+
+Examples:
+- Fact pattern: time-lapse traffic on a city road with buildings and autumn trees.
+  Good caption: "A fixed elevated view shows time-lapse traffic moving along a multi-lane urban road beside high-rise buildings and yellow autumn trees."
+- Fact pattern: woman at a desk using a mouse in an office setting.
+  Good caption: "A woman sits at a desk in an office-like workspace, using a mouse as the camera shifts from a frontal side angle to a closer profile view."
+
+Return JSON only in this shape:
+{
+  "style_name": "formal",
+  "caption": "caption text",
+  "grounded_facts_used": ["fact 1"],
+  "safety_notes": ["optional note"]
+}

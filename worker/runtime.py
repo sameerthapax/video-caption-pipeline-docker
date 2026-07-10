@@ -9,10 +9,8 @@ from pathlib import Path
 from worker.config.settings import settings
 
 
-def configure_logging() -> Path:
-    logs_dir = settings.debug_root / "logs"
-    logs_dir.mkdir(parents=True, exist_ok=True)
-    log_path = logs_dir / "pipeline.log"
+def configure_logging() -> Path | None:
+    log_path: Path | None = None
 
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.INFO)
@@ -25,9 +23,13 @@ def configure_logging() -> Path:
     stream_handler.setFormatter(formatter)
     root_logger.addHandler(stream_handler)
 
-    file_handler = logging.FileHandler(log_path, mode="a", encoding="utf-8")
-    file_handler.setFormatter(formatter)
-    root_logger.addHandler(file_handler)
+    if settings.debug_keep_temp:
+        logs_dir = settings.debug_root / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        log_path = logs_dir / "pipeline.log"
+        file_handler = logging.FileHandler(log_path, mode="a", encoding="utf-8")
+        file_handler.setFormatter(formatter)
+        root_logger.addHandler(file_handler)
 
     return log_path
 

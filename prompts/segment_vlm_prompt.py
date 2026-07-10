@@ -1,9 +1,17 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from schemas.segments import TemporalSegment
 from schemas.video_memory import VideoMemory
+
+
+PROMPT_DIR = Path(__file__).resolve().parent
+
+
+def load_segment_vlm_system_prompt() -> str:
+    return (PROMPT_DIR / "perception_system.txt").read_text(encoding="utf-8").strip()
 
 
 def build_segment_vlm_prompt(
@@ -11,212 +19,182 @@ def build_segment_vlm_prompt(
     job_id: str,
     segment: TemporalSegment,
     memory: VideoMemory,
-    include_transcript: bool = False,
 ) -> str:
     frames_payload = [
         {
             "frame_id": frame.frame_id,
             "timestamp": frame.timestamp,
-            "storage_path": frame.storage_path,
             "selection_reasons": frame.selection_reasons,
         }
         for frame in segment.frames
     ]
-    transcript_payload = []
-    if include_transcript:
-        transcript_payload = [
+    continuity_context = {
+        "last_segment_summary": _last_segment_summary(memory),
+        "tracked_subjects": [
             {
-                "start": chunk.start,
-                "end": chunk.end,
-                "text": chunk.text,
-                "expressive_transcript": chunk.expressive_transcript,
-                "music": chunk.music.model_dump(),
-                "tone": chunk.tone.model_dump(),
+                "subject_id": item.subject_id,
+                "type": item.type,
+                "appearance_summary": item.appearance_summary,
+                "current_state": item.current_state,
             }
-            for chunk in segment.transcript_chunks
-        ]
-    prior_memory = {
-        "segments_processed": memory.segments_processed,
-        "global_setting": memory.global_setting.model_dump(),
-        "persistent_subjects": [item.model_dump() for item in memory.persistent_subjects],
-        "persistent_objects": [item.model_dump() for item in memory.persistent_objects],
-        "timeline": [item.model_dump() for item in memory.timeline],
-        "segment_memories": [item.model_dump() for item in memory.segment_memories if item.memory],
-        "unresolved_uncertainties": memory.unresolved_uncertainties,
+            for item in memory.persistent_subjects
+        ],
+        "tracked_objects": [
+            {
+                "object_id": item.object_id,
+                "name": item.name,
+                "description": item.description,
+            }
+            for item in memory.persistent_objects
+        ],
+        "open_uncertainties": memory.unresolved_uncertainties,
     }
 
     return f"""
-You are analyzing segment {segment.segment_index + 1} of 5.
-Job ID: {job_id}
-This segment covers {segment.start}s to {segment.end}s.
-Percent range: {segment.percent_range}
+Video id: {job_id}
+Segment: {segment.segment_index + 1} of {max(1, len(memory.segment_memories))}
+Time range: {segment.start}s to {segment.end}s
 
-You are given selected video frames from this segment.
-You are also given accumulated memory from previous segments.
+Analyze these {len(segment.frames)} sampled frames in chronological order.
+Capture exact visible facts that help distinguish the clip:
+- setting
+- main subjects
+- important visible objects and colors
+- actions and changes over time
+- visible text when clearly readable
+- camera movement or viewpoint when obvious
 
-Your job:
-1. Analyze only the current segment frames.
-2. Use previous memory only to maintain continuity.
-3. Determine whether visible people, objects, or locations are the same as earlier.
-4. Update the memory instead of creating duplicates unnecessarily.
-5. Describe factual screen content, movement, visible behavior, emotion if visually clear, clothing, objects, setting, and timeline flow.
-6. Do not invent unseen actions.
-7. Do not infer identity, gender, relationship, profession, race, ethnicity, or private traits unless visually explicit.
-8. If uncertain, use "unknown" or confidence < 0.6.
-9. Return JSON only.
-10. `segment_index` must be the exact zero-based index for this segment: {segment.segment_index}.
-11. `segment_start` must be exactly {segment.start}.
-12. `segment_end` must be exactly {segment.end}.
-13. Use only these exact enum values:
-   - `visual_clarity`: `high`, `medium`, `low`
-   - `audio_clarity`: `high`, `medium`, `low`, `none`
-   - `type`: `person`, `animal`, `object`, `unknown`
-   - `evidence`: `visual`, `audio`, `both`
+Use prior continuity context only when the same visible subject or object clearly continues.
+If something is unclear, put it in `uncertainties`.
+If text is present but unreadable, do not put placeholder text in `visible_text`; mention that in `uncertainties`.
+Return only valid JSON matching the required schema.
 
-Important things to look for in every segment:
-- setting/location
-- visible people/subjects
-- subject appearance
-- clothing
-- posture
-- body movement
-- facial expression if clearly visible
-- emotion/mood if clearly supported
-- objects
-- object state changes
-- interactions between people/objects
-- actions and events
-- camera movement or scene transition
-- text visible on screen
-- continuity with previous segments
-- what changed from previous memory
-
-Strict anti-hallucination rules:
-- Only describe visible or audible evidence from the frames and transcript.
-- If visibility is weak, say that it is unclear.
-- If audio is missing or unclear, say that it is unclear.
-- Do not guess missing details.
-- Do not write styled captions, jokes, sarcasm, or commentary.
-
-Return JSON with exactly this structure:
-{json.dumps(_segment_response_shape(), indent=2)}
-
-Current segment frames:
+Sampled frames:
 {json.dumps(frames_payload, indent=2)}
 
-Accumulated memory from previous segments:
-{json.dumps(prior_memory, indent=2)}
-
-Current segment transcript chunks:
-{json.dumps(transcript_payload, indent=2)}
+Prior continuity context:
+{json.dumps(continuity_context, indent=2)}
 """.strip()
 
 
-def _segment_response_shape() -> dict:
+def build_segment_vlm_json_schema() -> dict:
     return {
-        "segment_index": 0,
-        "segment_start": 0.0,
-        "segment_end": 0.0,
-        "evidence_quality": {
-            "visual_clarity": "high",
-            "audio_clarity": "none",
-            "limitations": [],
-        },
-        "segment_description": {
-            "short_summary": "",
-            "detailed_visual_description": "",
-            "movement_and_flow": "",
-            "audio_summary": "",
-        },
-        "setting": {
-            "location_type": "",
-            "visual_environment": "",
-            "background_details": [],
-            "changes_from_previous_segment": "",
-        },
-        "subjects": [
-            {
-                "subject_id": "person_1",
-                "is_new": True,
-                "matched_previous_subject_id": None,
-                "type": "person",
-                "appearance": {
-                    "visible_features": [],
-                    "clothing": [],
-                    "colors": [],
-                    "accessories": [],
-                    "pose_or_posture": "",
-                    "confidence": 0.0,
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "segment_index": {"type": "integer"},
+            "segment_start": {"type": "number"},
+            "segment_end": {"type": "number"},
+            "visual_clarity": {"type": "string", "enum": ["high", "medium", "low"]},
+            "summary": {"type": "string"},
+            "scene_details": {"type": "string"},
+            "setting": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "location_type": {"type": "string"},
+                    "visual_environment": {"type": "string"},
+                    "background_details": {"type": "array", "items": {"type": "string"}},
                 },
-                "actions": [],
-                "movement": "",
-                "facial_expression": "",
-                "emotion_or_tone": {
-                    "label": "",
-                    "evidence": "",
-                    "confidence": 0.0,
+                "required": ["location_type", "visual_environment", "background_details"],
+            },
+            "subjects": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "subject_id": {"type": "string"},
+                        "matched_previous_subject_id": {"type": ["string", "null"]},
+                        "type": {"type": "string", "enum": ["person", "animal", "object", "unknown"]},
+                        "label": {"type": "string"},
+                        "visible_features": {"type": "array", "items": {"type": "string"}},
+                        "clothing": {"type": "array", "items": {"type": "string"}},
+                        "colors": {"type": "array", "items": {"type": "string"}},
+                        "pose_or_posture": {"type": "string"},
+                        "actions": {"type": "array", "items": {"type": "string"}},
+                        "state": {"type": "string"},
+                    },
+                    "required": [
+                        "subject_id",
+                        "matched_previous_subject_id",
+                        "type",
+                        "label",
+                        "visible_features",
+                        "clothing",
+                        "colors",
+                        "pose_or_posture",
+                        "actions",
+                        "state",
+                    ],
                 },
-                "state_change": "",
-                "confidence": 0.0,
-            }
-        ],
-        "objects": [
-            {
-                "object_id": "object_1",
-                "is_new": True,
-                "matched_previous_object_id": None,
-                "name": "",
-                "description": "",
-                "location_in_scene": "",
-                "state": "",
-                "interaction": "",
-                "confidence": 0.0,
-            }
-        ],
-        "events": [
-            {
-                "event_id": "event_1",
-                "approx_timestamp": 0.0,
-                "description": "",
-                "subjects_involved": [],
-                "objects_involved": [],
-                "evidence": "visual",
-                "confidence": 0.0,
-            }
-        ],
-        "visible_text": [{"text": "", "location": "", "confidence": 0.0}],
-        "audio_observations": {
-            "spoken_content_summary": "",
-            "music": {
-                "present": False,
-                "type": "",
-                "instrumentation": "",
-                "energy": "",
-                "description": "",
             },
-            "tone": {
-                "style": "",
-                "emotion": "",
-                "delivery": "",
-                "evidence": "",
-                "confidence": 0.0,
+            "objects": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "object_id": {"type": "string"},
+                        "matched_previous_object_id": {"type": ["string", "null"]},
+                        "name": {"type": "string"},
+                        "description": {"type": "string"},
+                        "location_in_scene": {"type": "string"},
+                        "state": {"type": "string"},
+                        "interaction": {"type": "string"},
+                    },
+                    "required": [
+                        "object_id",
+                        "matched_previous_object_id",
+                        "name",
+                        "description",
+                        "location_in_scene",
+                        "state",
+                        "interaction",
+                    ],
+                },
             },
+            "main_events": {"type": "array", "items": {"type": "string"}},
+            "focused_event": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "description": {"type": "string"},
+                    "subjects_involved": {"type": "array", "items": {"type": "string"}},
+                    "objects_involved": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["description", "subjects_involved", "objects_involved"],
+            },
+            "visible_text": {"type": "array", "items": {"type": "object", "additionalProperties": False, "properties": {
+                "text": {"type": "string"},
+                "location": {"type": "string"},
+            }, "required": ["text", "location"]}},
+            "continuity_notes": {"type": "array", "items": {"type": "string"}},
+            "segment_memory": {"type": "string"},
+            "uncertainties": {"type": "array", "items": {"type": "string"}},
         },
-        "continuity_update": {
-            "same_subjects_as_before": [],
-            "same_objects_as_before": [],
-            "new_subjects": [],
-            "new_objects": [],
-            "resolved_uncertainties": [],
-            "new_uncertainties": [],
-            "important_changes": [],
-        },
-        "memory_update_for_next_segment": {
-            "segment_memory": "",
-            "persistent_subjects": [],
-            "persistent_objects": [],
-            "persistent_setting": "",
-            "open_actions_or_context": [],
-            "timeline_update": [],
-        },
+        "required": [
+            "segment_index",
+            "segment_start",
+            "segment_end",
+            "visual_clarity",
+            "summary",
+            "scene_details",
+            "setting",
+            "subjects",
+            "objects",
+            "main_events",
+            "focused_event",
+            "visible_text",
+            "continuity_notes",
+            "segment_memory",
+            "uncertainties",
+        ],
     }
+
+
+def _last_segment_summary(memory: VideoMemory) -> str:
+    for entry in reversed(memory.segment_memories):
+        if entry.memory:
+            return entry.memory
+    return ""

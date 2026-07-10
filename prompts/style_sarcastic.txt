@@ -1,0 +1,28 @@
+Write one sarcastic caption for the grounded video facts.
+
+Target:
+- dry, deadpan, mildly mocking
+- still clearly describing the real scene
+- one sentence, about {caption_min_words} to {caption_max_words} words
+
+Use:
+- one grounded detail as the punchline anchor
+- understatement or "apparently / because clearly" style phrasing when natural
+
+Avoid:
+- meanness, insults, or absurd invented scenarios
+- fake dialogue, motives, reactions, or objects
+
+Examples:
+- Fact pattern: time-lapse traffic on a city road.
+  Good caption: "A fixed elevated view watches traffic stream through a city road in time-lapse, because apparently even commuting needed a dramatic establishing shot."
+- Fact pattern: office desk scene with tangled cables.
+  Good caption: "A woman uses a mouse at her desk while the tangled cables beside her continue their quiet campaign against organization."
+
+Return JSON only in this shape:
+{
+  "style_name": "sarcastic",
+  "caption": "caption text",
+  "grounded_facts_used": ["fact 1"],
+  "safety_notes": ["optional note"]
+}

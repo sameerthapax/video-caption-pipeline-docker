@@ -33,6 +33,8 @@ class FireworksResponseFormatError(FireworksError):
 class FireworksConfig(BaseModel):
     base_url: str = "https://api.fireworks.ai/inference/v1"
     api_key: str
+    proxy_url: str = ""
+    proxy_token: str = ""
     timeout_seconds: int = 90
     max_retries: int = 3
 
@@ -40,7 +42,11 @@ class FireworksConfig(BaseModel):
 class FireworksClient:
     def __init__(self, config: FireworksConfig) -> None:
         self.config = config
-        self._client = httpx.AsyncClient(timeout=self.config.timeout_seconds)
+        self._client = httpx.AsyncClient(
+            timeout=self.config.timeout_seconds,
+            http2=True,
+            limits=httpx.Limits(max_keepalive_connections=20, max_connections=50),
+        )
         self._image_uri_cache: dict[str, str] = {}
 
     async def aclose(self) -> None:
@@ -56,7 +62,7 @@ class FireworksClient:
         return {
             "provider": "fireworks",
             "api_style": "openai_compatible",
-            "base_url": self.config.base_url,
+            "base_url": self.config.proxy_url or self.config.base_url,
             "model": "",
         }
 
@@ -67,6 +73,8 @@ class FireworksClient:
         prompt: str,
         image_paths: list[str],
         temperature: float = 0.1,
+        response_schema: dict[str, Any] | None = None,
+        response_schema_name: str = "response",
     ) -> dict:
         content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
         for image_path in image_paths:
@@ -79,9 +87,12 @@ class FireworksClient:
         payload = {
             "model": model,
             "temperature": temperature,
-            "response_format": {"type": "json_object"},
             "messages": [{"role": "user", "content": content}],
         }
+        payload["response_format"] = _build_response_format(
+            schema=response_schema,
+            schema_name=response_schema_name,
+        )
         return await self._request_json(payload=payload)
 
     async def generate_json(
@@ -90,21 +101,28 @@ class FireworksClient:
         model: str,
         prompt: str,
         temperature: float = 0.1,
+        response_schema: dict[str, Any] | None = None,
+        response_schema_name: str = "response",
     ) -> dict:
         payload = {
             "model": model,
             "temperature": temperature,
-            "response_format": {"type": "json_object"},
             "messages": [{"role": "user", "content": [{"type": "text", "text": prompt}]}],
         }
+        payload["response_format"] = _build_response_format(
+            schema=response_schema,
+            schema_name=response_schema_name,
+        )
         return await self._request_json(payload=payload)
 
     async def _request_json(self, *, payload: dict[str, Any]) -> dict:
-        endpoint = f"{self.config.base_url.rstrip('/')}/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {self.config.api_key}",
-            "Content-Type": "application/json",
-        }
+        endpoint = self.config.proxy_url or f"{self.config.base_url.rstrip('/')}/chat/completions"
+        headers = {"Content-Type": "application/json"}
+        if self.config.proxy_url:
+            if self.config.proxy_token:
+                headers["X-Proxy-Token"] = self.config.proxy_token
+        else:
+            headers["Authorization"] = f"Bearer {self.config.api_key}"
         model_name = str(payload.get("model") or "")
         last_error: Exception | None = None
         semaphore = get_loop_semaphore(
@@ -113,6 +131,11 @@ class FireworksClient:
         )
         for attempt in range(1, self.config.max_retries + 1):
             try:
+                if settings.log_model_io:
+                    logger.info(
+                        "Fireworks request payload: %s",
+                        json.dumps(_sanitize_fireworks_payload(payload), ensure_ascii=False),
+                    )
                 async with semaphore:
                     response = await self._client.post(endpoint, headers=headers, json=payload)
                 if response.status_code >= 400:
@@ -124,17 +147,35 @@ class FireworksClient:
                         f"Fireworks request failed for model {model_name} with status {response.status_code}: {response.text[:500]}"
                     )
                 response_payload = response.json()
+                if settings.log_model_io:
+                    logger.info(
+                        "Fireworks raw response: %s",
+                        json.dumps(_truncate_json_payload(response_payload), ensure_ascii=False),
+                    )
                 parsed = _extract_json_object(response_payload)
-                if parsed is not None:
+                if parsed is not None and parsed != {}:
+                    if settings.log_model_io:
+                        logger.info(
+                            "Fireworks parsed response: %s",
+                            json.dumps(parsed, ensure_ascii=False),
+                        )
                     return parsed
+                reasoning_text = _extract_reasoning_text(response_payload)
+                if parsed == {} and reasoning_text:
+                    raise FireworksResponseFormatError(
+                        "Fireworks returned an empty JSON object while placing useful content in reasoning text.",
+                        raw_text=reasoning_text,
+                        payload=response_payload,
+                    )
                 output_text = _extract_output_text(response_payload)
                 if not output_text:
                     raise FireworksResponseFormatError(
                         "Fireworks response did not contain parseable output.",
                         payload=response_payload,
                     )
+                candidate_text = _extract_json_substring(_strip_code_fences(output_text))
                 try:
-                    parsed_text = json.loads(_strip_code_fences(output_text))
+                    parsed_text = json.loads(candidate_text)
                 except json.JSONDecodeError as exc:
                     raise FireworksResponseFormatError(
                         "Fireworks returned non-JSON output.",
@@ -146,6 +187,11 @@ class FireworksClient:
                         "Fireworks returned JSON that was not an object.",
                         raw_text=output_text,
                         payload=response_payload,
+                    )
+                if settings.log_model_io:
+                    logger.info(
+                        "Fireworks parsed response: %s",
+                        json.dumps(parsed_text, ensure_ascii=False),
                     )
                 return parsed_text
             except (httpx.HTTPError, FireworksError, FireworksResponseFormatError) as exc:
@@ -197,6 +243,16 @@ def _extract_output_text(payload: dict[str, Any]) -> str:
     return ""
 
 
+def _extract_reasoning_text(payload: dict[str, Any]) -> str:
+    choices = payload.get("choices") or []
+    for choice in choices:
+        message = choice.get("message") or {}
+        reasoning_content = message.get("reasoning_content")
+        if isinstance(reasoning_content, str) and reasoning_content.strip():
+            return reasoning_content
+    return ""
+
+
 def _strip_code_fences(text: str) -> str:
     stripped = text.strip()
     if stripped.startswith("```"):
@@ -204,6 +260,26 @@ def _strip_code_fences(text: str) -> str:
         if stripped.endswith("```"):
             stripped = stripped[:-3]
     return stripped.strip()
+
+
+def _extract_json_substring(text: str) -> str:
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        return text[start : end + 1]
+    return text
+
+
+def _build_response_format(*, schema: dict[str, Any] | None, schema_name: str) -> dict[str, Any]:
+    if schema:
+        return {
+            "type": "json_schema",
+            "json_schema": {
+                "name": schema_name,
+                "schema": schema,
+            },
+        }
+    return {"type": "json_object"}
 
 
 def _extract_json_object(payload: Any) -> dict[str, Any] | None:
@@ -227,7 +303,7 @@ def _extract_json_object(payload: Any) -> dict[str, Any] | None:
                 return found
     if isinstance(payload, str):
         try:
-            parsed = json.loads(_strip_code_fences(payload))
+            parsed = json.loads(_extract_json_substring(_strip_code_fences(payload)))
         except json.JSONDecodeError:
             return None
         if isinstance(parsed, dict):
@@ -238,6 +314,45 @@ def _extract_json_object(payload: Any) -> dict[str, Any] | None:
 def _looks_like_object_payload(payload: dict[str, Any]) -> bool:
     if "segment_index" in payload and "segment_description" in payload:
         return True
-    if "factual_summary" in payload and "detailed_timeline" in payload:
+    if "factual_summary" in payload:
         return True
     return False
+
+
+def _sanitize_fireworks_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    sanitized = dict(payload)
+    messages = []
+    for message in payload.get("messages", []):
+        if not isinstance(message, dict):
+            messages.append(message)
+            continue
+        content_blocks = []
+        for block in message.get("content", []):
+            if not isinstance(block, dict):
+                content_blocks.append(block)
+                continue
+            if block.get("type") == "image_url":
+                image_url = ((block.get("image_url") or {}).get("url")) or ""
+                content_blocks.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"<data_uri length={len(image_url)}>",
+                        },
+                    }
+                )
+            else:
+                content_blocks.append(block)
+        messages.append({**message, "content": content_blocks})
+    sanitized["messages"] = messages
+    return sanitized
+
+
+def _truncate_json_payload(payload: Any, *, max_string_length: int = 2000) -> Any:
+    if isinstance(payload, dict):
+        return {key: _truncate_json_payload(value, max_string_length=max_string_length) for key, value in payload.items()}
+    if isinstance(payload, list):
+        return [_truncate_json_payload(item, max_string_length=max_string_length) for item in payload]
+    if isinstance(payload, str) and len(payload) > max_string_length:
+        return payload[:max_string_length] + "...<truncated>"
+    return payload

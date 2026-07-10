@@ -9,12 +9,13 @@ from schemas.video_memory import (
     VideoMemory,
 )
 from schemas.vlm import ObjectObservation, SegmentVlmResponse, SubjectObservation
+from worker.config.settings import settings
 
 
 def create_video_memory(*, job_id: str) -> VideoMemory:
     return VideoMemory(
         job_id=job_id,
-        segment_memories=[SegmentMemoryEntry(segment_index=index) for index in range(5)],
+        segment_memories=[SegmentMemoryEntry(segment_index=index) for index in range(settings.pipeline_segment_count)],
     )
 
 
@@ -46,11 +47,13 @@ def merge_segment_into_memory(*, memory: VideoMemory, segment: TemporalSegment, 
         start=segment.start,
         end=segment.end,
         summary=response.segment_description.short_summary,
-        key_events=[
-            event.description
-            for event in response.events
-            if event.description
-        ] + response.memory_update_for_next_segment.timeline_update,
+        key_events=_dedupe_preserve_order(
+            [
+                event.description
+                for event in response.events
+                if event.description
+            ] + response.memory_update_for_next_segment.timeline_update
+        ),
     )
     memory.timeline = [item for item in memory.timeline if item.segment_index != segment.segment_index]
     memory.timeline.append(timeline_entry)
@@ -60,7 +63,7 @@ def merge_segment_into_memory(*, memory: VideoMemory, segment: TemporalSegment, 
     memory.unresolved_uncertainties = [
         item for item in memory.unresolved_uncertainties if item not in resolved
     ]
-    for item in response.continuity_update.new_uncertainties:
+    for item in _dedupe_preserve_order(response.continuity_update.new_uncertainties):
         if item and item not in memory.unresolved_uncertainties:
             memory.unresolved_uncertainties.append(item)
 
@@ -74,9 +77,6 @@ def _merge_setting(*, memory: VideoMemory, response: SegmentVlmResponse) -> None
     for item in response.setting.background_details:
         if item and item not in memory.global_setting.stable_environment_details:
             memory.global_setting.stable_environment_details.append(item)
-    change = response.setting.changes_from_previous_segment
-    if change and change not in memory.global_setting.setting_changes:
-        memory.global_setting.setting_changes.append(change)
 
 
 def _normalize_subject(subject: SubjectObservation) -> SubjectObservation:
@@ -149,3 +149,15 @@ def _merge_object(*, memory: VideoMemory, obj: ObjectObservation, segment_index:
         if value and value not in existing.state_history:
             existing.state_history.append(value)
     existing.confidence = max(existing.confidence, obj.confidence)
+
+
+def _dedupe_preserve_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for value in values:
+        normalized = value.strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        ordered.append(normalized)
+    return ordered

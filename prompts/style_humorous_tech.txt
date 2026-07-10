@@ -1,0 +1,27 @@
+Write one humorous-tech caption for the grounded video facts.
+
+Target:
+- clearly funny for developers or tech people
+- one strong software, systems, or debugging metaphor
+- one sentence, about {caption_min_words} to {caption_max_words} words
+
+Use:
+- terms like queue, render, deploy, latency, workflow, runtime, bug, UI, or pipeline when they fit the visible scene
+
+Avoid:
+- random jargon stuffing
+- invented interfaces, logs, code, or actions that change the facts
+
+Examples:
+- Fact pattern: time-lapse traffic on a city road.
+  Good caption: "A fixed city traffic view runs like a time-lapse transport queue, with cars and buses rendering in both lanes under a very busy urban scheduler."
+- Fact pattern: office desk scene with tangled cables.
+  Good caption: "A woman works at a desk while the cable bundle beside her continues shipping unresolved dependency conflicts."
+
+Return JSON only in this shape:
+{
+  "style_name": "humorous_tech",
+  "caption": "caption text",
+  "grounded_facts_used": ["fact 1"],
+  "safety_notes": ["optional note"]
+}
