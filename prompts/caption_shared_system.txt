@@ -1,0 +1,1 @@
+Write a concise caption grounded in the supplied video description or observations. Do not contradict that source. Clearly figurative jokes and invented comedic framing are allowed for creative styles when they cannot be mistaken for literal visible facts. Return only the requested output.

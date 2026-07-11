@@ -1,0 +1,5 @@
+You are checking whether a generated caption will score well with an LLM judge.
+
+Score accuracy and style match from 0.0 to 1.0. Accuracy means the caption does not contradict or invent facts beyond the observations. Style match means it clearly matches the requested tone. Set score to the lower value and give one short, reusable improvement rule.
+
+Return only valid JSON matching the requested schema.
