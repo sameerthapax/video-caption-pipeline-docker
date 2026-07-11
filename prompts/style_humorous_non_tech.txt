@@ -1,20 +1,19 @@
-Write a specific humorous non-tech caption for the video.
+Write a humorous non-tech caption or summary for the video.
 
 Rules:
-- Use a relatable joke, meme, or first-person reaction anchored to this exact clip.
-- Explicitly include the main visible subject or action and weave one to three additional anchors into the joke.
-- Pick one relatable joke angle with two to four total anchors; avoid overloaded descriptions and camera-analysis wording.
-- `Me ...` framing and fictional everyday setups are allowed when the visible evidence remains recognizable.
-- Keep meme context broadly figurative; do not invent concrete props or settings such as an office party, snacks, charcuterie board, group chat, wrong exit, treat bag, or other room.
-- Avoid unrelated setups involving a group project, one slide, or fixing one quick bug. Use broader relatable framing tied directly to the visible action.
-- In office scenes, use typing, keyboard, monitor, mouse or cables, ceiling lights, plants, and glass partitions rather than jewelry, religion, or accessories.
-- A dramatic bush entrance and a tail at full alert are useful anchors; a generic party-arrival line alone is not.
-- Do not list every detail, but do not let fictional framing replace the subject or action.
-- Do not add unsupported exact durations, years, unseen rooms or objects, food or treats, spreadsheets, meetings, religious references, medical or political references, or precise internal mental states.
-- Prefer safe comic framing such as a party entrance, deadline energy, dramatic entrance, or office epic.
-- Good pattern: a kitten makes a dramatic bush entrance with its tail raised and walks toward the camera.
-- Bad pattern: `Me taking the wrong exit three blocks ago.` It replaces the visible scene with invented specifics.
-- Good kitten pattern: `Me showing up after saying I would stay home: dramatic bush entrance, tail up, zero exit strategy.`
-- Prefer one or two substantial sentences. Very short lines must be unusually specific to the clip.
-- Do not use programming, systems, AI, or developer jargon.
+- Preserve only facts supported by the observations.
+- Make the humor clearly understandable to a general audience.
+- Avoid tech jargon, programming references, and AI terminology.
+- Mention the main subject, setting, and primary action when the observations support them.
+- Prefer one obvious everyday comparison attached to a true visual detail.
+- The caption must include a light everyday joke or comparison; do not return a plain formal description.
+- Do not add events, objects, speech, or motives that are not in the observations.
+- Never turn an item from "uncertainties" into a fact.
+- Every concrete place, object, action, and visible text claim must be supported by the observations.
+- If the observations are uncertain, use generic wording instead of guessing.
+- Metaphors are allowed, but they must not imply unseen objects, dialogue, plans, or hidden intentions.
+- Humor may exaggerate the importance of visible actions only. Do not invent new actions such as sniffing, speaking, demanding, performing, or reacting unless observed.
+- Use the observed setting exactly. Do not rename it as a backyard, forest, stage, office, kitchen, or other place unless that is observed.
+- Prefer one concise everyday comparison over a full invented scenario. The caption must still read like a true video description.
+- Keep it to one or two concise sentences.
 - Return only the caption text.

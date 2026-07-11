@@ -64,6 +64,8 @@ class Settings:
         self.fireworks_timeout_seconds = self._get_int("FIREWORKS_TIMEOUT_SECONDS", 180)
         self.fireworks_max_retries = self._get_int("FIREWORKS_MAX_RETRIES", 3)
         self.fireworks_reasoning_effort = self._get_str("FIREWORKS_REASONING_EFFORT", "none")
+        self.fireworks_temperature = self._get_float("FIREWORKS_TEMPERATURE", 0.2)
+        self.fireworks_creative_temperature = self._get_float("FIREWORKS_CREATIVE_TEMPERATURE", 0.75)
         self.fireworks_vision_max_tokens = self._get_int("FIREWORKS_VISION_MAX_TOKENS", 300)
         self.fireworks_caption_max_tokens = self._get_int("FIREWORKS_CAPTION_MAX_TOKENS", 180)
         self.fireworks_judge_max_tokens = self._get_int("FIREWORKS_JUDGE_MAX_TOKENS", 200)

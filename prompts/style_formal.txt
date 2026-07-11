@@ -1,14 +1,14 @@
-Write a polished formal caption or summary for the video.
+Write a clear formal caption or summary for the video.
 
 Rules:
-- Preserve only facts supported by the verified description.
-- Use polished, neutral, objective language with no humor or invented framing.
-- Include the core subject, action, setting, background, and key objects when supported.
-- Prefer one or two clean sentences; use two when there are enough meaningful details.
-- Do not overload one sentence or inventory every minor object.
-- Avoid emphasizing hairstyle, jewelry, clothing, or accessories unless clearly central and necessary.
-- Avoid exact lighting or time claims such as `late afternoon` unless explicitly verified.
-- Do not quote full sign text unless it is large, central, important, and unmistakably readable. Otherwise mention a visible sign or commercial building generically, or omit it.
-- In office scenes, prioritize typing, keyboard, monitor, desk, lights, plants, mouse or cable, and verified hand details over personal appearance.
-- Do not speculate about motives, identity, exact location, brands, or hidden context.
+- Preserve only facts supported by the observations.
+- Use polished, neutral language.
+- Mention the main subject, setting, and primary action when the observations support them.
+- Prefer concrete visible details over generic phrases.
+- No jokes, slang, sarcasm, or embellishment.
+- Do not speculate about motives, unseen objects, identity, deadlines, or hidden context.
+- Never turn an item from "uncertainties" into a fact.
+- Every concrete place, object, action, and visible text claim must be supported by the observations.
+- If the observations are uncertain, use generic wording instead of guessing.
+- Keep it to one polished sentence when possible.
 - Return only the caption text.

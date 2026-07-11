@@ -1,18 +1,20 @@
-Write a specific humorous-tech caption for the video.
+Write a humorous-tech caption or summary for the video.
 
 Rules:
-- Build one connected developer, systems, or game metaphor across the caption.
-- Sound like a human making a tech joke, not a technical scene parser or rendering-debug report.
-- Explicitly include the main visible subject or action and weave one to three additional visible anchors into the metaphor.
-- Pick one connected metaphor and two to four total anchors rather than converting every visible detail into technical jargon.
-- For example, traffic can become NPC pathfinding shaped by traffic lights, a server tick, frame rate, or a foliage shader.
-- A lone generic line such as `the server tick rate dropped` is not enough without scene-specific anchors.
-- NPCs, render, compile, stack overflow, infinite loop, merge conflict, queue, cache, and low-poly LOD are available angles.
-- Prefer NPCs, frame rate, render, shader, queue, compile, merge conflict, infinite loop, or server tick. Avoid camera frustums, fixed angles, draw distance, render-distance shifts, and repetitive LOD or biome wording.
-- In office scenes, prefer a typing loop, keyboard input, office process, monitor, or mouse queue. Keep the person's role generic; do not call them a `dev` unless developer or programming work is verified.
-- The metaphor need not map every element literally, but it must not replace or contradict the actual scene.
-- Do not add unsupported exact durations, years, unseen rooms or objects, food, spreadsheets, meetings, religious references, medical or political references, or precise internal mental states.
-- Prefer one or two connected, substantial sentences over a generic one-line tech joke.
-- Good pattern: cars render as motion blur across an avenue while green lights run the traffic loop and yellow trees max out the foliage shader.
-- Bad pattern: `Server tick rate dropped to 1 FPS.` It could describe any clip.
+- Preserve only facts supported by the observations.
+- Make the humor clearly understandable to developers or tech people.
+- You may use light references to bugs, latency, deploys, logs, prompts, APIs, or debugging.
+- Mention the main subject, setting, and primary action when the observations support them.
+- Prefer one obvious tech metaphor attached to a true visual detail.
+- The caption must include at least one clear tech reference such as queue, deploy, debug, API, latency, log, cache, scheduler, pipeline, rollback, commit, runtime, or bug.
+- Do not return a plain formal description.
+- Do not add events, objects, speech, or motives that are not in the observations.
+- Never turn an item from "uncertainties" into a fact.
+- Every concrete place, object, action, and visible text claim must be supported by the observations.
+- If the observations are uncertain, use generic wording instead of guessing.
+- Metaphors are allowed, but they must not imply unseen objects, dialogue, plans, or hidden intentions.
+- Humor may exaggerate the importance of visible actions only. Do not invent new actions such as sniffing, speaking, demanding, performing, or reacting unless observed.
+- Use the observed setting exactly. Do not rename it as a backyard, forest, stage, office, kitchen, or other place unless that is observed.
+- Prefer one concise tech metaphor over a full invented scenario. The caption must still read like a true video description.
+- Keep it to one or two concise sentences.
 - Return only the caption text.

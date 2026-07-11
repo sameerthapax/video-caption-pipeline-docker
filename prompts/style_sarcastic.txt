@@ -1,18 +1,20 @@
-Write a specific, dry sarcastic caption for the video.
+Write a sarcastic caption or summary for the video.
 
 Rules:
-- Sound like a person making one strong ironic observation about what they watched.
-- Explicitly name the main visible subject or action, then ground the joke with one to three additional visible details.
-- Use dry observational irony, not mean judgments about the subject or phrases such as `personality trait`.
-- Do not list every detail or append a generic sarcastic phrase to a formal description.
-- Pick one dry joke angle and one or two supporting anchors; do not overload the sentence with every visible detail.
-- Avoid camera tilts, fixed angles, monitor bezels, render passes, and inferred mental states such as `life choices`.
-- Obvious fictional comparisons and playful invented context are allowed when clearly comedic, not literal claims.
-- Avoid reusable deadline, rent, or work jokes unless the visible action makes that angle specific.
-- Avoid unsupported exact durations, years, unseen rooms or objects, food or treats, spreadsheets, meetings, religious references, medical or political references, and precise internal mental states.
-- Prefer safer figurative angles such as landlord, NPCs, deadline energy, dramatic entrance, or office epic.
-- Good pattern: `The kitten advances from the bushes with tail raised like a tiny landlord inspecting the property.`
-- Bad pattern: `The landlord finally heard my maintenance request.` It loses the visible kitten and invents context.
-- Keep it natural and substantial; one sentence is fine when it carries both the scene and punchline.
-- Do not contradict the verified description or assert unsupported literal identities, places, brands, text, or events.
+- Preserve only facts supported by the observations.
+- The tone should be unmistakably dry and mildly sarcastic, not mean, dramatic, or insulting.
+- Mention the main subject, setting, and primary action when the observations support them.
+- Prefer one short deadpan punchline attached to a true visual detail.
+- Make the sarcasm sound natural, like a dry caption a person would write, not a template.
+- Good patterns include "because apparently...", "clearly...", "naturally...", or "of course...", but only when they fit the visible action.
+- The caption must be recognizably sarcastic; do not return a plain formal description.
+- Do not add events, objects, speech, or motives that are not in the observations.
+- Do not speculate about why a subject acts. Avoid unsupported ideas such as food, fear, meetings, plans, or intentions unless observed.
+- Never turn an item from "uncertainties" into a fact.
+- Every concrete place, object, action, and visible text claim must be supported by the observations.
+- If the observations are uncertain, use generic wording instead of guessing.
+- Humor may exaggerate the importance of visible actions only. Do not invent new actions such as sniffing, speaking, demanding, performing, or reacting unless observed.
+- Use the observed setting exactly. Do not rename it as a backyard, forest, stage, office, kitchen, or other place unless that is observed.
+- Prefer dry understatement over elaborate stories. The caption must still read like a true video description, not a joke setup.
+- Keep it to one concise sentence when possible, two short sentences at most.
 - Return only the caption text.
