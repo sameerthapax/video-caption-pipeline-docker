@@ -74,6 +74,8 @@ Relevant code:
 - All model traffic uses Fireworks OpenAI-compatible chat completions
 - The Cloudflare Worker injects `accounts/fireworks/models/kimi-k2p6` for every role
 - Vision, caption, and judge requests all use `FIREWORKS_MODEL`
+- `LLM_PROVIDER=fireworks|openrouter` chooses which OpenAI-compatible upstream handles vision, caption, and judge requests
+- For `openrouter`, the worker sends `OPENROUTER_MODEL` in the request body and the proxy forwards it unchanged
 
 ## Structured Output
 
@@ -129,10 +131,15 @@ The container writes `/output/results.json`:
 - `CAPTION_PIPELINE_MODE=verified_scene|direct_vision|observation_first`
 - `OBSERVATION_CAPTION_MODE=combined|per_style`
 - `RUN_JUDGE_CHECKS=true|false` (defaults to `false`)
+- `LLM_PROVIDER=fireworks|openrouter`
 - `FIREWORKS_MODEL`
 - `FIREWORKS_PROXY_URL`
 - `FIREWORKS_PROXY_TOKEN`
 - `FIREWORKS_API_KEY`
+- `OPENROUTER_MODEL`
+- `OPENROUTER_PROXY_URL`
+- `OPENROUTER_PROXY_TOKEN`
+- `OPENROUTER_API_KEY`
 - `ENABLE_LOCAL_WHISPER=true|false`
 
 ## Run

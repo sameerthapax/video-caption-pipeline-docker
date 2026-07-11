@@ -31,6 +31,7 @@ class FireworksResponseFormatError(FireworksError):
 
 
 class FireworksConfig(BaseModel):
+    provider_name: str = "fireworks"
     api_key: str
     model: str = "accounts/fireworks/models/kimi-k2p6"
     base_url: str = "https://api.fireworks.ai/inference/v1"
@@ -160,11 +161,18 @@ class FireworksClient:
             payload["temperature"] = temperature
         if max_tokens is not None:
             payload["max_tokens"] = max_tokens
-        if self.config.reasoning_effort:
+        if self._should_send_reasoning_effort():
             payload["reasoning_effort"] = self.config.reasoning_effort
         if response_schema is not None:
             payload["response_format"] = _build_response_format(schema=response_schema, schema_name=response_schema_name)
         return payload
+
+    def _should_send_reasoning_effort(self) -> bool:
+        if not self.config.reasoning_effort:
+            return False
+        if self.config.provider_name == "openrouter" and self.config.reasoning_effort == "none":
+            return False
+        return True
 
     def _max_tokens_for_endpoint(self, endpoint_path: str) -> int:
         if endpoint_path.startswith("/vision"):
@@ -194,6 +202,8 @@ class FireworksClient:
         }
 
     async def _request(self, *, payload: dict[str, Any], endpoint_path: str) -> dict[str, Any]:
+        provider_name = (self.config.provider_name or "llm").strip()
+        provider_label = provider_name.capitalize()
         if self.config.proxy_url:
             endpoint = f"{self.config.proxy_url.rstrip('/')}{endpoint_path}"
         else:
@@ -207,30 +217,30 @@ class FireworksClient:
 
         last_error: Exception | None = None
         semaphore = get_loop_semaphore(
-            name="fireworks_requests",
+            name=f"{provider_name}_requests",
             limit=max(1, settings.max_concurrent_jobs),
         )
         for attempt in range(1, self.config.max_retries + 1):
             try:
                 if settings.log_model_io:
-                    logger.info("Fireworks request payload: %s", json.dumps(_truncate_json_payload(payload), ensure_ascii=False))
+                    logger.info("%s request payload: %s", provider_label, json.dumps(_truncate_json_payload(payload), ensure_ascii=False))
                 async with semaphore:
                     response = await self._client.post(endpoint, headers=headers, json=payload)
                 if response.status_code >= 400:
                     raise FireworksError(
-                        f"Fireworks request failed for endpoint {endpoint_path} with status {response.status_code}: {response.text[:500]}"
+                        f"{provider_label} request failed for endpoint {endpoint_path} with status {response.status_code}: {response.text[:500]}"
                     )
                 response_payload = response.json()
                 if settings.log_model_io:
-                    logger.info("Fireworks raw response: %s", json.dumps(_truncate_json_payload(response_payload), ensure_ascii=False))
+                    logger.info("%s raw response: %s", provider_label, json.dumps(_truncate_json_payload(response_payload), ensure_ascii=False))
                 return response_payload
             except (httpx.HTTPError, ValueError, FireworksError) as exc:
                 last_error = exc
-                logger.warning("Fireworks request attempt %s/%s failed: %s", attempt, self.config.max_retries, exc)
+                logger.warning("%s request attempt %s/%s failed: %s", provider_label, attempt, self.config.max_retries, exc)
                 if attempt >= self.config.max_retries:
                     break
                 await _sleep_backoff(attempt)
-        raise FireworksError(str(last_error) if last_error else "Fireworks request failed.")
+        raise FireworksError(str(last_error) if last_error else f"{provider_label} request failed.")
 
 
 def _extract_output_text(payload: dict[str, Any]) -> str:

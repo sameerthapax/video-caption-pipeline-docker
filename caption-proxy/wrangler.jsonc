@@ -12,7 +12,8 @@
 	},
 	"upload_source_maps": true,
 	"vars": {
-		"FIREWORKS_MODEL": "accounts/fireworks/models/kimi-k2p6"
+		"FIREWORKS_MODEL": "accounts/fireworks/models/kimi-k2p6",
+		"OPENROUTER_MODEL": "google/gemini-3.5-flash"
 	},
 	"compatibility_flags": [
 		"nodejs_compat"

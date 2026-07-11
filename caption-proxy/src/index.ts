@@ -1,10 +1,13 @@
 export interface Env {
   FIREWORKS_API_KEY: string;
+  OPENROUTER_API_KEY: string;
   PROXY_TOKEN: string;
   FIREWORKS_MODEL: string;
+  OPENROUTER_MODEL: string;
 }
 
 const FIREWORKS_BASE = "https://api.fireworks.ai/inference/v1";
+const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
 
 function unauthorized() {
   return new Response("unauthorized", { status: 401 });
@@ -27,7 +30,7 @@ function buildUpstreamUrl(targetBase: string, upstreamPath: string, search: stri
   return new URL(`${normalizedPath}${search}`, normalizedBase);
 }
 
-async function buildForwardBody(req: Request, model: string) {
+async function buildForwardBody(req: Request, model?: string) {
   if (req.method === "GET" || req.method === "HEAD") {
     return undefined;
   }
@@ -36,7 +39,7 @@ async function buildForwardBody(req: Request, model: string) {
     return req.body;
   }
   const payload = await req.json<any>();
-  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+  if (model && payload && typeof payload === "object" && !Array.isArray(payload)) {
     payload.model = model;
   }
   return JSON.stringify(payload);
@@ -47,7 +50,7 @@ async function forward(
   targetBase: string,
   apiKey: string,
   pathPrefix: string,
-  model: string,
+  model?: string,
 ) {
   const url = new URL(req.url);
   const upstreamPath = url.pathname.replace(pathPrefix, "") || "/";
@@ -102,6 +105,18 @@ export default {
 
     if (url.pathname.startsWith("/judge")) {
       return forward(request, FIREWORKS_BASE, env.FIREWORKS_API_KEY, "/judge", env.FIREWORKS_MODEL);
+    }
+
+    if (url.pathname.startsWith("/openrouter/vision")) {
+      return forward(request, OPENROUTER_BASE, env.OPENROUTER_API_KEY, "/openrouter/vision", env.OPENROUTER_MODEL);
+    }
+
+    if (url.pathname.startsWith("/openrouter/caption")) {
+      return forward(request, OPENROUTER_BASE, env.OPENROUTER_API_KEY, "/openrouter/caption", env.OPENROUTER_MODEL);
+    }
+
+    if (url.pathname.startsWith("/openrouter/judge")) {
+      return forward(request, OPENROUTER_BASE, env.OPENROUTER_API_KEY, "/openrouter/judge", env.OPENROUTER_MODEL);
     }
 
     return new Response("ok", { status: 200 });

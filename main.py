@@ -16,7 +16,7 @@ from pipeline.normalize import normalize_video
 from pipeline.probe_video import probe_video_metadata
 from pipeline.transcription import load_or_create_transcript
 from schemas.caption import STYLE_ORDER, StyleName
-from services.client_pool import close_pooled_async_clients, get_fireworks_client
+from services.client_pool import close_pooled_async_clients, get_llm_client
 from services.local_files import download_file, guess_video_suffix
 from services.process import ProcessExecutionError, run_command
 from worker.config.settings import settings
@@ -183,7 +183,7 @@ def _process_task(task: Any) -> dict[str, Any]:
         )
 
         pipeline = CaptionPipeline(
-            llm_client=get_fireworks_client(),
+            llm_client=get_llm_client(),
             artifact_root=artifact_root,
             persist_artifacts=settings.debug_keep_temp,
         )
@@ -253,8 +253,19 @@ def _download_optional_transcript(*, task: Any, task_root: Path) -> Path | None:
 
 def _missing_generation_dependencies() -> list[str]:
     missing: list[str] = []
-    if not settings.fireworks_proxy_url and not settings.fireworks_api_key:
-        missing.append("FIREWORKS_PROXY_URL or FIREWORKS_API_KEY")
+    if settings.llm_provider == "fireworks":
+        if not settings.fireworks_proxy_url and not settings.fireworks_api_key:
+            missing.append("FIREWORKS_PROXY_URL or FIREWORKS_API_KEY")
+        if not settings.fireworks_model:
+            missing.append("FIREWORKS_MODEL")
+        return missing
+    if settings.llm_provider == "openrouter":
+        if not settings.openrouter_proxy_url and not settings.openrouter_api_key:
+            missing.append("OPENROUTER_PROXY_URL or OPENROUTER_API_KEY")
+        if not settings.openrouter_model:
+            missing.append("OPENROUTER_MODEL")
+        return missing
+    missing.append("LLM_PROVIDER must be 'fireworks' or 'openrouter'")
     return missing
 
 
