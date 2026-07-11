@@ -11,6 +11,9 @@
 		"enabled": true
 	},
 	"upload_source_maps": true,
+	"vars": {
+		"FIREWORKS_MODEL": "accounts/fireworks/models/kimi-k2p6"
+	},
 	"compatibility_flags": [
 		"nodejs_compat"
 	]

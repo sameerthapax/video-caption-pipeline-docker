@@ -24,6 +24,43 @@ def extract_frames_for_video(
 ) -> FrameExtractionArtifact:
     output_dir.mkdir(parents=True, exist_ok=True)
     target_frame_count = compute_dynamic_frame_count(video_metadata.duration, settings.max_frames_per_video)
+
+    if not settings.enable_planned_frame_extraction:
+        anchor_frames = _extract_at_timestamps(
+            video_path=video_path,
+            frame_dir=output_dir / "anchor",
+            width=settings.frame_extract_width,
+            timestamps=[(timestamp, ["anchor"]) for timestamp in _sample_anchor_timestamps(
+                video_metadata.duration,
+                target_frame_count,
+            )],
+            score_lookup={},
+        )
+        if anchor_frames:
+            return FrameExtractionArtifact(
+                job_id=job_id,
+                duration_seconds=video_metadata.duration,
+                target_frame_count=target_frame_count,
+                strategy="anchor",
+                frames=anchor_frames,
+            )
+        uniform_frames = _extract_uniform_frames(
+            video_path=video_path,
+            frame_dir=output_dir / "uniform",
+            max_frames=target_frame_count,
+            width=settings.frame_extract_width,
+            duration=video_metadata.duration,
+        )
+        if uniform_frames:
+            return FrameExtractionArtifact(
+                job_id=job_id,
+                duration_seconds=video_metadata.duration,
+                target_frame_count=target_frame_count,
+                strategy="uniform",
+                frames=uniform_frames,
+            )
+        raise RuntimeError(f"Could not extract frames from {video_path}")
+
     scene_result = analyze_scene_changes(
         video_path=video_path,
         duration=video_metadata.duration,

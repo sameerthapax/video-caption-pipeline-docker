@@ -1,28 +1,20 @@
-Write a single humorous non-tech caption from the grounded video facts.
+Write a specific humorous non-tech caption for the video.
 
-Voice:
-- warm, light, and immediately understandable
-- funny for a general audience without sounding corny
-- one sentence, roughly {caption_min_words} to {caption_max_words} words
-
-Use:
-- one everyday comparison, social observation, or ordinary-life joke tied to a real visible detail
-- humor that helps the scene rather than replacing it
-
-Do not:
-- use tech jargon
-- invent dialogue, motives, or off-screen context
-- turn the caption into a string of multiple jokes
-
-A good result should feel like:
-- one grounded scene
-- one relatable comic angle
-- one clean sentence
-
-Return JSON only in this shape:
-{
-  "style_name": "humorous_non_tech",
-  "caption": "caption text",
-  "grounded_facts_used": ["fact 1"],
-  "safety_notes": ["optional note"]
-}
+Rules:
+- Use a relatable joke, meme, or first-person reaction anchored to this exact clip.
+- Explicitly include the main visible subject or action and weave one to three additional anchors into the joke.
+- Pick one relatable joke angle with two to four total anchors; avoid overloaded descriptions and camera-analysis wording.
+- `Me ...` framing and fictional everyday setups are allowed when the visible evidence remains recognizable.
+- Keep meme context broadly figurative; do not invent concrete props or settings such as an office party, snacks, charcuterie board, group chat, wrong exit, treat bag, or other room.
+- Avoid unrelated setups involving a group project, one slide, or fixing one quick bug. Use broader relatable framing tied directly to the visible action.
+- In office scenes, use typing, keyboard, monitor, mouse or cables, ceiling lights, plants, and glass partitions rather than jewelry, religion, or accessories.
+- A dramatic bush entrance and a tail at full alert are useful anchors; a generic party-arrival line alone is not.
+- Do not list every detail, but do not let fictional framing replace the subject or action.
+- Do not add unsupported exact durations, years, unseen rooms or objects, food or treats, spreadsheets, meetings, religious references, medical or political references, or precise internal mental states.
+- Prefer safe comic framing such as a party entrance, deadline energy, dramatic entrance, or office epic.
+- Good pattern: a kitten makes a dramatic bush entrance with its tail raised and walks toward the camera.
+- Bad pattern: `Me taking the wrong exit three blocks ago.` It replaces the visible scene with invented specifics.
+- Good kitten pattern: `Me showing up after saying I would stay home: dramatic bush entrance, tail up, zero exit strategy.`
+- Prefer one or two substantial sentences. Very short lines must be unusually specific to the clip.
+- Do not use programming, systems, AI, or developer jargon.
+- Return only the caption text.

@@ -1,28 +1,18 @@
-Write a single humorous tech caption from the grounded video facts.
+Write a specific humorous-tech caption for the video.
 
-Voice:
-- smart and playful for people who understand software or systems language
-- built around one coherent tech analogy
-- one sentence, roughly {caption_min_words} to {caption_max_words} words
-
-Use:
-- engineering or product language only where it cleanly maps to the scene
-- terms such as queue, deploy, render, runtime, latency, bug, interface, workflow, cache, or rollback when they genuinely fit
-
-Do not:
-- dump random jargon for decoration
-- invent code, windows, logs, or UI elements that are not supported
-- replace the visible scene with a pure metaphor
-
-Best pattern:
-- let the scene stay visible
-- layer one systems joke over it
-- keep the joke understandable in a single read
-
-Return JSON only in this shape:
-{
-  "style_name": "humorous_tech",
-  "caption": "caption text",
-  "grounded_facts_used": ["fact 1"],
-  "safety_notes": ["optional note"]
-}
+Rules:
+- Build one connected developer, systems, or game metaphor across the caption.
+- Sound like a human making a tech joke, not a technical scene parser or rendering-debug report.
+- Explicitly include the main visible subject or action and weave one to three additional visible anchors into the metaphor.
+- Pick one connected metaphor and two to four total anchors rather than converting every visible detail into technical jargon.
+- For example, traffic can become NPC pathfinding shaped by traffic lights, a server tick, frame rate, or a foliage shader.
+- A lone generic line such as `the server tick rate dropped` is not enough without scene-specific anchors.
+- NPCs, render, compile, stack overflow, infinite loop, merge conflict, queue, cache, and low-poly LOD are available angles.
+- Prefer NPCs, frame rate, render, shader, queue, compile, merge conflict, infinite loop, or server tick. Avoid camera frustums, fixed angles, draw distance, render-distance shifts, and repetitive LOD or biome wording.
+- In office scenes, prefer a typing loop, keyboard input, office process, monitor, or mouse queue. Keep the person's role generic; do not call them a `dev` unless developer or programming work is verified.
+- The metaphor need not map every element literally, but it must not replace or contradict the actual scene.
+- Do not add unsupported exact durations, years, unseen rooms or objects, food, spreadsheets, meetings, religious references, medical or political references, or precise internal mental states.
+- Prefer one or two connected, substantial sentences over a generic one-line tech joke.
+- Good pattern: cars render as motion blur across an avenue while green lights run the traffic loop and yellow trees max out the foliage shader.
+- Bad pattern: `Server tick rate dropped to 1 FPS.` It could describe any clip.
+- Return only the caption text.

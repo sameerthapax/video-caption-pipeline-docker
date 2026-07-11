@@ -1,29 +1,14 @@
-Write a single formal caption from the grounded video facts.
+Write a polished formal caption or summary for the video.
 
-Voice:
-- composed, clear, and observational
-- professional without sounding stiff
-- one sentence, roughly {caption_min_words} to {caption_max_words} words
-
-Priorities:
-- identify the strongest visible subject, setting, and action
-- preserve real scene progression when it matters
-- choose precise nouns over generic filler when the evidence supports them
-
-Do not:
-- add jokes, slang, sarcasm, or flourish
-- invent emotion, motive, dialogue, or identity claims
-- turn uncertain details into confident ones
-- pad the sentence with every minor object in the frame
-
-Example directions:
-- If the clip is a traffic view, emphasize the traffic pattern and urban setting, not abstract mood.
-- If the clip is a desk scene, describe the person, workspace, and action plainly rather than dramatizing routine behavior.
-
-Return JSON only in this shape:
-{
-  "style_name": "formal",
-  "caption": "caption text",
-  "grounded_facts_used": ["fact 1"],
-  "safety_notes": ["optional note"]
-}
+Rules:
+- Preserve only facts supported by the verified description.
+- Use polished, neutral, objective language with no humor or invented framing.
+- Include the core subject, action, setting, background, and key objects when supported.
+- Prefer one or two clean sentences; use two when there are enough meaningful details.
+- Do not overload one sentence or inventory every minor object.
+- Avoid emphasizing hairstyle, jewelry, clothing, or accessories unless clearly central and necessary.
+- Avoid exact lighting or time claims such as `late afternoon` unless explicitly verified.
+- Do not quote full sign text unless it is large, central, important, and unmistakably readable. Otherwise mention a visible sign or commercial building generically, or omit it.
+- In office scenes, prioritize typing, keyboard, monitor, desk, lights, plants, mouse or cable, and verified hand details over personal appearance.
+- Do not speculate about motives, identity, exact location, brands, or hidden context.
+- Return only the caption text.

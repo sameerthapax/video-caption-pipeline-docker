@@ -1,29 +1,18 @@
-Write a single sarcastic caption from the grounded video facts.
+Write a specific, dry sarcastic caption for the video.
 
-Voice:
-- dry, restrained, and obviously ironic
-- mildly sharp, never cruel
-- one sentence, roughly {caption_min_words} to {caption_max_words} words
-
-How to make it work:
-- anchor the joke to one real visual detail
-- keep the factual backbone intact
-- use understatement, weary certainty, or deadpan contrast when it fits
-
-Do not:
-- invent fake situations, props, or dialogue
-- insult the subject directly
-- drift into absurdity that breaks grounding
-- make the sarcasm so subtle that it reads as plain formal description
-
-Useful angle:
-- Treat ordinary behavior like it is quietly overqualified for the situation.
-- Let one visible detail carry the sarcasm instead of stuffing in multiple jokes.
-
-Return JSON only in this shape:
-{
-  "style_name": "sarcastic",
-  "caption": "caption text",
-  "grounded_facts_used": ["fact 1"],
-  "safety_notes": ["optional note"]
-}
+Rules:
+- Sound like a person making one strong ironic observation about what they watched.
+- Explicitly name the main visible subject or action, then ground the joke with one to three additional visible details.
+- Use dry observational irony, not mean judgments about the subject or phrases such as `personality trait`.
+- Do not list every detail or append a generic sarcastic phrase to a formal description.
+- Pick one dry joke angle and one or two supporting anchors; do not overload the sentence with every visible detail.
+- Avoid camera tilts, fixed angles, monitor bezels, render passes, and inferred mental states such as `life choices`.
+- Obvious fictional comparisons and playful invented context are allowed when clearly comedic, not literal claims.
+- Avoid reusable deadline, rent, or work jokes unless the visible action makes that angle specific.
+- Avoid unsupported exact durations, years, unseen rooms or objects, food or treats, spreadsheets, meetings, religious references, medical or political references, and precise internal mental states.
+- Prefer safer figurative angles such as landlord, NPCs, deadline energy, dramatic entrance, or office epic.
+- Good pattern: `The kitten advances from the bushes with tail raised like a tiny landlord inspecting the property.`
+- Bad pattern: `The landlord finally heard my maintenance request.` It loses the visible kitten and invents context.
+- Keep it natural and substantial; one sentence is fine when it carries both the scene and punchline.
+- Do not contradict the verified description or assert unsupported literal identities, places, brands, text, or events.
+- Return only the caption text.

@@ -27,9 +27,9 @@ For each task in `/input/tasks.json`, the pipeline:
 
 1. extract frames
 2. read transcript if available
-3. describe the scene from frames with the vision model
+3. describe the scene from frames with Kimi K2.6 on Fireworks
 4. verify that description against the frames
-5. generate captions one style at a time with OpenAI
+5. generate captions one style at a time through Fireworks
 6. optionally run judge checks
 
 Code path:
@@ -71,16 +71,15 @@ Relevant code:
 
 ## Models
 
-- Vision analysis uses the proxy-configured vision model, defaulting to `VISION_MODEL=gemma-4-31b-it`
-- Final caption writing uses OpenAI, defaulting to `OPENAI_CAPTION_MODEL=gpt-5.5`
-- Judge checks use `OPENAI_JUDGE_MODEL`
+- All model traffic uses Fireworks OpenAI-compatible chat completions
+- The Cloudflare Worker injects `accounts/fireworks/models/kimi-k2p6` for every role
+- Vision, caption, and judge requests all use `FIREWORKS_MODEL`
 
 ## Structured Output
 
-Structured output is enforced in two places:
+Structured output is enforced in one place:
 
-- the vision client sends `responseSchema` when requesting JSON
-- the OpenAI Responses client uses strict `text.format = json_schema`
+- the Fireworks client sends `response_format.type = json_schema` with `strict = true`
 
 All JSON outputs are also validated with Pydantic models after the API call.
 
@@ -129,13 +128,11 @@ The container writes `/output/results.json`:
 
 - `CAPTION_PIPELINE_MODE=verified_scene|direct_vision|observation_first`
 - `OBSERVATION_CAPTION_MODE=combined|per_style`
-- `RUN_JUDGE_CHECKS=true|false`
-- `VISION_PROXY_URL`
-- `VISION_PROXY_TOKEN`
-- `VISION_MODEL`
-- `OPENAI_PROXY_URL`
-- `OPENAI_PROXY_TOKEN`
-- `OPENAI_CAPTION_MODEL`
+- `RUN_JUDGE_CHECKS=true|false` (defaults to `false`)
+- `FIREWORKS_MODEL`
+- `FIREWORKS_PROXY_URL`
+- `FIREWORKS_PROXY_TOKEN`
+- `FIREWORKS_API_KEY`
 - `ENABLE_LOCAL_WHISPER=true|false`
 
 ## Run

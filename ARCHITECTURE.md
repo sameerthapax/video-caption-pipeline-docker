@@ -33,7 +33,7 @@ input/tasks.json
 frames
   -> describe scene
   -> verify description
-  -> OpenAI writes captions one style at a time
+  -> Fireworks Kimi K2.6 writes captions one style at a time
   -> optional judge checks
 ```
 
@@ -72,15 +72,11 @@ Scene scoring remains in:
 
 - [pipeline/scene_change.py](/Users/sams/Desktop/video-caption-pipeline-docker/pipeline/scene_change.py:1)
 
-## Providers
+## Provider
 
-Vision JSON and text generation:
+All model traffic is routed through:
 
-- [services/vision_llm_client.py](/Users/sams/Desktop/video-caption-pipeline-docker/services/vision_llm_client.py:1)
-
-OpenAI final caption and judge generation:
-
-- [services/openai_responses_client.py](/Users/sams/Desktop/video-caption-pipeline-docker/services/openai_responses_client.py:1)
+- [services/fireworks_client.py](/Users/sams/Desktop/video-caption-pipeline-docker/services/fireworks_client.py:1)
 
 ## Schemas
 
