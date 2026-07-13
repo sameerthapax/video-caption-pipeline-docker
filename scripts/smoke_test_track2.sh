@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-IMAGE_NAME="${1:-video-caption-hackathon:smoke}"
+IMAGE_NAME="${1:-gemma-caption-pipe:smoke}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INPUT_DIR="$ROOT_DIR/input"
 OUTPUT_DIR="$ROOT_DIR/output"

@@ -7,7 +7,7 @@ from pathlib import Path
 from services.process import ProcessExecutionError, run_command
 from worker.config.settings import settings
 
-logger = logging.getLogger("video-caption-pipeline.worker")
+logger = logging.getLogger("gemma-caption-pipe.worker")
 
 
 def load_or_create_transcript(

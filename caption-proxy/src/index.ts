@@ -1,9 +1,9 @@
-export interface Env {
+/// <reference path="../worker-configuration.d.ts" />
+
+interface RuntimeEnv extends Env {
   FIREWORKS_API_KEY: string;
   OPENROUTER_API_KEY: string;
   PROXY_TOKEN: string;
-  FIREWORKS_MODEL: string;
-  OPENROUTER_MODEL: string;
 }
 
 const FIREWORKS_BASE = "https://api.fireworks.ai/inference/v1";
@@ -30,7 +30,7 @@ function buildUpstreamUrl(targetBase: string, upstreamPath: string, search: stri
   return new URL(`${normalizedPath}${search}`, normalizedBase);
 }
 
-async function buildForwardBody(req: Request, model?: string) {
+async function buildForwardBody(req: Request, defaultModel?: string) {
   if (req.method === "GET" || req.method === "HEAD") {
     return undefined;
   }
@@ -39,8 +39,8 @@ async function buildForwardBody(req: Request, model?: string) {
     return req.body;
   }
   const payload = await req.json<any>();
-  if (model && payload && typeof payload === "object" && !Array.isArray(payload)) {
-    payload.model = model;
+  if (defaultModel && payload && typeof payload === "object" && !Array.isArray(payload) && !payload.model) {
+    payload.model = defaultModel;
   }
   return JSON.stringify(payload);
 }
@@ -88,7 +88,7 @@ function rewriteUploadUrlHeader(response: Response, req: Request, pathPrefix: st
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: RuntimeEnv): Promise<Response> {
     if (request.headers.get("x-proxy-token") !== env.PROXY_TOKEN) {
       return unauthorized();
     }
@@ -104,7 +104,13 @@ export default {
     }
 
     if (url.pathname.startsWith("/judge")) {
-      return forward(request, FIREWORKS_BASE, env.FIREWORKS_API_KEY, "/judge", env.FIREWORKS_MODEL);
+      return forward(
+        request,
+        FIREWORKS_BASE,
+        env.FIREWORKS_API_KEY,
+        "/judge",
+        env.FIREWORKS_JUDGE_MODEL || env.FIREWORKS_MODEL,
+      );
     }
 
     if (url.pathname.startsWith("/openrouter/vision")) {
@@ -116,7 +122,13 @@ export default {
     }
 
     if (url.pathname.startsWith("/openrouter/judge")) {
-      return forward(request, OPENROUTER_BASE, env.OPENROUTER_API_KEY, "/openrouter/judge", env.OPENROUTER_MODEL);
+      return forward(
+        request,
+        OPENROUTER_BASE,
+        env.OPENROUTER_API_KEY,
+        "/openrouter/judge",
+        env.OPENROUTER_JUDGE_MODEL || undefined,
+      );
     }
 
     return new Response("ok", { status: 200 });

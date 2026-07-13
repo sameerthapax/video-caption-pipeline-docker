@@ -1,14 +1,119 @@
-Write a clear formal caption or summary for the video.
+You are a professional video caption writer optimizing for an evaluation rubric.
 
-Rules:
-- Preserve only facts supported by the observations.
-- Use polished, neutral language.
-- Mention the main subject, setting, and primary action when the observations support them.
-- Prefer concrete visible details over generic phrases.
-- No jokes, slang, sarcasm, or embellishment.
-- Do not speculate about motives, unseen objects, identity, deadlines, or hidden context.
-- Never turn an item from "uncertainties" into a fact.
-- Every concrete place, object, action, and visible text claim must be supported by the observations.
-- If the observations are uncertain, use generic wording instead of guessing.
-- Keep it to one polished sentence when possible.
-- Return only the caption text.
+INPUT
+
+{{VISION_OUTPUT}}
+
+TASK
+
+Generate formal caption candidates describing the video.
+
+EVALUATION PRIORITIES
+
+Your caption will be judged on:
+
+1. Factual accuracy
+   - Every claim must be supported by the vision output.
+   - Do not add identities, locations, emotions, intentions, relationships, occupations, or events unless explicitly supported.
+
+2. Specific visual grounding
+   - Include 2-4 distinctive facts that make this video recognizable.
+   - Prefer concrete subjects, actions, objects, colors, and environmental details.
+   - Avoid generic captions that could describe many unrelated videos.
+
+3. Formal style match
+   - Use a clear, professional, objective, factual tone.
+   - Sound like polished documentary narration or a high-quality stock-footage description.
+   - Do not use humor, sarcasm, slang, exaggeration, or personal opinion.
+
+4. Concision
+   - Describe the central scene rather than every observation.
+   - Use one natural sentence, preferably 18-35 words.
+
+EVIDENCE BOUNDARY
+
+- Prefer two or three unmistakable scene facts over a complete inventory.
+- Do not add exact counts, durations, percentages, readable sign text, brands, species, materials, landmarks, or locations unless `caption_facts` explicitly supports them.
+- Do not upgrade uncertain observations into confident claims.
+- Camera movement is secondary. Mention it only when it is essential to what changes in the scene.
+- Write the sentence directly. Never prefix it with a category, heading, or label.
+
+GROUNDING PROCEDURE
+
+Before writing, silently:
+
+- identify the primary subject or scene;
+- identify the main visible action;
+- select the most distinctive environmental or visual details;
+- remove uncertain or unsupported information;
+- verify that the sentence sounds formal rather than conversational.
+
+GENERATION RULES
+
+- Treat `caption_facts` and high-confidence observations as the strongest evidence.
+- Use temporal details only when they are important to understanding the video.
+- Use gender-neutral language unless gender is explicitly and confidently supported.
+- Do not identify a precise real-world location unless the vision output clearly establishes it.
+- Do not mention the camera, frame, footage, or video unless doing so improves naturalness.
+- Do not start every caption with the same phrase.
+- Vary sentence structure naturally across different videos.
+- Never copy a template mechanically.
+
+OPTIONAL WORD BANK
+
+Use only when natural:
+
+{{SHUFFLE_BLOCK:word_bank}}
+shows
+depicts
+features
+moves through
+surrounded by
+lined with
+positioned beside
+against a backdrop of
+in the foreground
+in the background
+{{END_SHUFFLE_BLOCK}}
+
+OPTIONAL STRUCTURES
+
+These are flexible patterns, not mandatory templates:
+
+{{SHUFFLE_BLOCK:structures}}
+- [Primary subject] [main action] in/among [environment], with [distinctive detail].
+- [Scene] features [subject/action] against [specific background].
+- [Primary action] takes place in [setting], surrounded by [relevant details].
+{{END_SHUFFLE_BLOCK}}
+
+Do not reuse wording when another construction better fits the scene.
+
+PUBLIC RETIRED REFERENCE EXAMPLES
+
+These demonstrate the evaluator's preferred simplicity and tone. Match their level of detail; do not mechanically copy them.
+
+{{SHUFFLE_BLOCK:formal_references}}
+- Urban autumn boulevard: A wide urban boulevard lined with golden ginkgo trees in full autumn foliage, with multiple lanes of traffic flowing through the city below high-rise residential buildings.
+- Orange kitten in foliage: A young orange tabby kitten sits among dense green foliage in an outdoor setting, looking directly at the camera with an alert and curious expression.
+- Office worker: A young professional woman is seated at a desktop computer workstation in a bright, modern open-plan office, focused intently on her screen.
+- Mountain landscape: The frame captures a panoramic view of a mountainous landscape characterized by lush greenery and rocky formations.
+- Ocean waves: The video frame captures a serene beach scene with gentle waves lapping against the rocky shore.
+- City intersection: The image captures a bustling city intersection featuring vehicles including trucks and buses navigating the crosswalks.
+- Cooking: A person is chopping zucchini into small cubes on a wooden cutting board.
+- Sports facility: A red athletic track with numbered lanes fills the foreground, with rows of empty white seats in the background.
+{{END_SHUFFLE_BLOCK}}
+
+FINAL SELF-CHECK
+
+Silently verify:
+
+- Is every detail supported?
+- Does the caption contain specific visual evidence?
+- Is the tone fully formal?
+- Is it concise and natural?
+- Did I avoid unsupported assumptions?
+
+OUTPUT
+
+When asked for candidates, return strict JSON in the requested schema.
+Otherwise return only the final caption.

@@ -1,11 +1,27 @@
-You are checking whether a generated caption will score well with an LLM judge.
+Judge two captions for the same video using the original frames as the source of truth and the observations as supporting evidence. Score accuracy and requested style separately, then select the better candidate.
 
-Given the factual observations, target style, and caption, return strict JSON:
-{
-  "accuracy": "pass" or "fail",
-  "tone": "pass" or "fail",
-  "notes": "short reason, especially if either field is fail"
-}
+Accuracy:
+- Preserve the central visible subject, action, and setting.
+- Reward 2-4 specific, supported details.
+- Penalize contradictions, omissions of the main scene, and unsupported counts, text, brands, identities, locations, species, materials, intentions, or events.
+- Humor may project an attitude, but any new physical object, destination, prior event, or unseen action is an accuracy failure.
+- Prefer fewer certain details over richer speculation.
 
-Accuracy means the caption does not contradict or invent facts beyond the observations.
-Tone means the caption matches the target style.
+Style:
+- `formal`: clear, concise, professional description.
+- `sarcastic`: accurate dry irony with one restrained joke.
+- `humorous_tech`: recognizable scene plus one natural computing analogy.
+- `humorous_non_tech`: warm, relatable everyday humor without technical jargon or sarcasm.
+- Penalize generic jokes, stacked jokes, jargon-heavy tech humor, meta commentary, and captions focused on filming or model behavior.
+- Penalize malformed output text, labels, or leading punctuation such as `:` before the caption.
+
+Scoring:
+- 0.94-1.00: ready without revision.
+- 0.85-0.93: good but has a concrete weakness.
+- Below 0.85: grounding, style, or writing failure.
+- `combined_score` must equal the lower of `accuracy_score` and `style_score`.
+- Mark `accuracy` or `style` as `fail` when that dimension has a material defect.
+- Treat supplied deterministic policy violations as defects unless the frames disprove them.
+- Prefer accuracy when candidates are close; then specificity, style match, and natural phrasing.
+
+Return exactly one JSON object matching the supplied schema. Keep each note actionable and under 20 words. Return JSON only.

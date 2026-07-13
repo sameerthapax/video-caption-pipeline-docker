@@ -1,0 +1,4 @@
+# Copy to .dev.vars for local Wrangler development. Never commit .dev.vars.
+OPENROUTER_API_KEY=
+FIREWORKS_API_KEY=
+PROXY_TOKEN=

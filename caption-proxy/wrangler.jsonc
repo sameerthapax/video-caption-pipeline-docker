@@ -4,7 +4,7 @@
  */
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "caption-proxy",
+	"name": "gemma-caption-pipe-proxy",
 	"main": "src/index.ts",
 	"compatibility_date": "2026-07-09",
 	"observability": {
@@ -13,7 +13,9 @@
 	"upload_source_maps": true,
 	"vars": {
 		"FIREWORKS_MODEL": "accounts/fireworks/models/kimi-k2p6",
-		"OPENROUTER_MODEL": "google/gemini-3.5-flash"
+		"FIREWORKS_JUDGE_MODEL": "accounts/fireworks/models/kimi-k2p6",
+		"OPENROUTER_MODEL": "google/gemma-4-31b-it",
+		"OPENROUTER_JUDGE_MODEL": "google/gemma-4-31b-it"
 	},
 	"compatibility_flags": [
 		"nodejs_compat"

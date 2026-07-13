@@ -5,7 +5,12 @@ __pycache__/
 
 # C extensions
 *.so
-.env.hackathon
+.env*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
 input
 output
 .idea

@@ -1,28 +1,19 @@
+from schemas.caption import CandidateJudgeEvaluation, CaptionCandidates, CaptionVariant, JudgeResult, ObservationResult, STYLE_ORDER, StyleName
+from schemas.frames import FrameArtifact, FrameExtractionArtifact
+from schemas.tasks import CaptionTask, TaskResult
 from schemas.video import VideoMetadata
-from schemas.caption import CaptionVariant, JudgeResult, ObservationResult, STYLE_ORDER, StyleName
-from schemas.frames import FrameArtifact, FrameExtractionArtifact, SceneCandidateScore
 
 __all__ = [
+    "CaptionTask",
+    "CaptionCandidates",
     "CaptionVariant",
+    "CandidateJudgeEvaluation",
     "FrameArtifact",
     "FrameExtractionArtifact",
     "JudgeResult",
     "ObservationResult",
-    "SceneCandidateScore",
     "STYLE_ORDER",
     "StyleName",
+    "TaskResult",
     "VideoMetadata",
-]
-
-__all__ = [
-    "FrameArtifact",
-    "FrameSamplingArtifact",
-    "GlobalFactualSummary",
-    "SegmentVlmResponse",
-    "TemporalSegmentsArtifact",
-    "TranscriptChunk",
-    "TranscriptionRequestArtifact",
-    "VideoMetadata",
-    "VideoMemory",
-    "VlmSegmentsArtifact",
 ]

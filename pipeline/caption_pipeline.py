@@ -8,13 +8,13 @@ from pathlib import Path
 from typing import Any
 
 from pipeline.extract_frames import extract_frames_for_video
-from prompts.prompt_loader import load_prompt
-from schemas.caption import CaptionVariant, JudgeResult, STYLE_ORDER, StyleName, build_combined_captions_json_schema, build_judge_json_schema, build_observation_json_schema
+from prompts.prompt_loader import load_prompt, render_prompt
+from schemas.caption import CandidateJudgeEvaluation, CaptionCandidates, CaptionVariant, JudgeResult, STYLE_ORDER, StyleName, build_caption_candidates_json_schema, build_judge_json_schema, build_observation_json_schema
 from schemas.frames import FrameExtractionArtifact
 from schemas.video import VideoMetadata
 from worker.config.settings import settings
 
-logger = logging.getLogger("video-caption-pipeline.worker")
+logger = logging.getLogger("gemma-caption-pipe.worker")
 
 STYLE_PROMPTS = {
     "formal": "style_formal.txt",
@@ -27,36 +27,36 @@ VISION_ENDPOINT = "/vision/chat/completions"
 CAPTION_ENDPOINT = "/caption/chat/completions"
 JUDGE_ENDPOINT = "/judge/chat/completions"
 
-OBSERVATION_SCHEMA_PREVIEW = json.dumps(
-    {
-        "summary": "one factual overview sentence",
-        "setting": "where the video appears to take place",
-        "subjects": ["visible subject or object"],
-        "key_objects": ["important visible objects, colors, signs, or environmental details"],
-        "actions": ["important visible action"],
-        "timeline": ["beginning: ...", "middle: ...", "end: ..."],
-        "visible_text": ["text visible in frames, or empty array"],
-        "audio_or_speech": ["relevant transcript or audio cue, or empty array"],
-        "uncertainties": ["anything unclear or ambiguous, or empty array"],
-    },
-    indent=2,
-)
-
-CREATIVE_STYLES = {"sarcastic", "humorous_tech", "humorous_non_tech"}
 TECH_STYLE_WORDS = {
+    "agent",
     "api",
+    "bandwidth",
     "bug",
+    "build",
     "cache",
+    "code",
     "commit",
+    "compiler",
+    "database",
     "debug",
     "deploy",
+    "inference",
+    "kernel",
     "latency",
     "log",
+    "model",
+    "network",
+    "node",
+    "packet",
     "pipeline",
+    "process",
     "queue",
     "rollback",
     "runtime",
     "scheduler",
+    "server",
+    "stack",
+    "thread",
 }
 SARCASM_STYLE_MARKERS = {
     "apparently",
@@ -69,32 +69,16 @@ SARCASM_STYLE_MARKERS = {
     "thrilling",
 }
 UNICODE_ESCAPE_SEQUENCE = re.compile(r"(?:\\u[0-9a-fA-F]{4})+")
-
-VERIFIED_STYLE_PROMPTS = {
-    "formal": (
-        "Write a formal, professional, objective caption. Factual tone, no humor. "
-        "Style example only: 'The subject proceeds through the marked route without deviation.'"
-    ),
-    "sarcastic": (
-        "Write a sarcastic caption: dry, ironic, lightly mocking, grounded in the specific action described. "
-        "Style example only: 'The subject surveys its kingdom of one bench with the confidence of a landlord.'"
-    ),
-    "humorous_tech": (
-        "Write a funny caption using technology, software, programming, network, game engine, or debugging references. "
-        "Style example only: '404: graceful landing not found.'"
-    ),
-    "humorous_non_tech": (
-        "Write a funny everyday-humor caption with no technical jargon, relatable and light-hearted. "
-        "Style example only: 'Confidence level: main character. Execution level: blooper reel.'"
-    ),
+CREATIVE_STYLES = {"sarcastic", "humorous_tech", "humorous_non_tech"}
+STYLE_WORD_LIMITS: dict[StyleName, tuple[int, int]] = {
+    "formal": (10, 36),
+    "sarcastic": (8, 30),
+    "humorous_tech": (10, 32),
+    "humorous_non_tech": (8, 30),
 }
-
-STYLE_DESCRIPTIONS = {
-    "formal": "Professional, objective, factual tone. No jokes, slang, sarcasm, or embellishment.",
-    "sarcastic": "Dry, ironic, lightly mocking tone while staying true to the observed video.",
-    "humorous_tech": "Funny with technology or programming references, but still grounded in the observations.",
-    "humorous_non_tech": "Funny everyday humor for a general audience, with no technical jargon.",
-}
+NUMBER_TOKEN = re.compile(r"(?<!\w)\d+(?:\.\d+)?%?(?!\w)")
+UNSUPPORTED_PROP_TERMS = ("appointment", "oven", "pan", "snack", "tennis ball", "treat")
+UNSUPPORTED_HISTORY_PHRASES = ("for the first time",)
 
 
 class CaptionPipeline:
@@ -102,10 +86,12 @@ class CaptionPipeline:
         self,
         *,
         llm_client,
+        judge_client,
         artifact_root: Path,
         persist_artifacts: bool,
     ) -> None:
         self.llm_client = llm_client
+        self.judge_client = judge_client
         self.artifact_root = artifact_root
         self.persist_artifacts = persist_artifacts
 
@@ -129,33 +115,104 @@ class CaptionPipeline:
         if transcript_text.strip():
             self._persist_text("transcript.txt", transcript_text.strip())
 
-        if settings.caption_pipeline_mode == "verified_scene":
-            captions, observations, checks = await self._run_verified_scene_mode(
-                frame_artifact=frame_artifact,
-                transcript_text=transcript_text,
-                requested_styles=requested_styles,
+        observations = await self._generate_observations(
+            job_id=job_id,
+            transcript_text=transcript_text,
+            frame_artifact=frame_artifact,
+        )
+        self._persist_json("observations.json", observations)
+        frame_paths = [frame.local_path for frame in frame_artifact.frames]
+
+        async def generate_for_style(style_name: StyleName) -> tuple[StyleName, CaptionVariant, JudgeResult]:
+            vision_output = json.dumps(observations, indent=2, ensure_ascii=False)
+            prompt = render_prompt(
+                STYLE_PROMPTS[style_name],
+                replacements={"VISION_OUTPUT": vision_output},
             )
-        elif settings.caption_pipeline_mode == "direct_vision":
-            captions, observations, checks = await self._run_direct_vision_mode(
-                frame_artifact=frame_artifact,
-                transcript_text=transcript_text,
-                requested_styles=requested_styles,
-            )
-        elif settings.caption_pipeline_mode == "observation_first":
-            captions, observations, checks = await self._run_observation_first_mode(
-                job_id=job_id,
-                frame_artifact=frame_artifact,
-                transcript_text=transcript_text,
-                requested_styles=requested_styles,
-            )
-        else:
-            raise ValueError(f"Unsupported CAPTION_PIPELINE_MODE: {settings.caption_pipeline_mode}")
+            temperature = settings.fireworks_creative_temperature
+            prior_candidates: dict[str, str] | None = None
+            prior_judge_result: JudgeResult | None = None
+            final_candidates: dict[str, str] | None = None
+            final_judge_result: JudgeResult | None = None
+
+            for attempt_index in range(1, 4):
+                prompt_text = _build_caption_candidates_user_prompt(
+                    style_name=style_name,
+                    prior_candidates=prior_candidates,
+                    prior_judge_result=prior_judge_result,
+                )
+                payload = await self.llm_client.generate_json(
+                    prompt=prompt_text,
+                    system_prompt=prompt,
+                    temperature=temperature,
+                    response_schema=build_caption_candidates_json_schema(),
+                    response_schema_name=f"{style_name}_candidates_attempt_{attempt_index}",
+                    endpoint_path=CAPTION_ENDPOINT,
+                )
+                candidates = CaptionCandidates.model_validate(payload)
+                candidate_payload = {
+                    "candidate_1": _clean_caption(candidates.candidate_1),
+                    "candidate_2": _clean_caption(candidates.candidate_2),
+                }
+                policy_violations = _candidate_policy_violations(
+                    style_name=style_name,
+                    candidates=candidate_payload,
+                    observations=observations,
+                )
+                if all(policy_violations.values()):
+                    retry_payload = await self.llm_client.generate_json(
+                        prompt=(
+                            prompt_text
+                            + "\n\nBoth candidates violate caption policy:\n"
+                            + json.dumps(policy_violations, indent=2)
+                            + "\nKeep the facts unchanged and return two corrected candidates in the same JSON format."
+                        ),
+                        system_prompt=prompt,
+                        temperature=temperature,
+                        response_schema=build_caption_candidates_json_schema(),
+                        response_schema_name=f"{style_name}_candidates_style_retry_{attempt_index}",
+                        endpoint_path=CAPTION_ENDPOINT,
+                    )
+                    retried = CaptionCandidates.model_validate(retry_payload)
+                    candidate_payload = {
+                        "candidate_1": _clean_caption(retried.candidate_1),
+                        "candidate_2": _clean_caption(retried.candidate_2),
+                    }
+                    policy_violations = _candidate_policy_violations(
+                        style_name=style_name,
+                        candidates=candidate_payload,
+                        observations=observations,
+                    )
+
+                judge_result = await self._judge_style(
+                    style_name=style_name,
+                    observations=observations,
+                    frame_paths=frame_paths,
+                    candidates=candidate_payload,
+                    policy_violations=policy_violations,
+                )
+                final_candidates = candidate_payload
+                final_judge_result = judge_result
+                selected_evaluation = _selected_evaluation(judge_result)
+                if _judge_passes(selected_evaluation):
+                    break
+                prior_candidates = candidate_payload
+                prior_judge_result = judge_result
+
+            assert final_candidates is not None
+            assert final_judge_result is not None
+            selected_caption = final_candidates[final_judge_result.selected_candidate]
+            return style_name, CaptionVariant(style_name=style_name, caption=selected_caption), final_judge_result
+
+        generated = await asyncio.gather(*(generate_for_style(style_name) for style_name in requested_styles))
+        captions = {style_name: variant for style_name, variant, _judge in generated}
+        checks = {style_name: judge for style_name, _variant, judge in generated}
+        self._persist_json("checks.json", {style_name: check.model_dump(mode="json") for style_name, check in checks.items()})
 
         self._persist_json(
             "final_result.json",
             {
                 "job_id": job_id,
-                "mode": settings.caption_pipeline_mode,
                 "captions": {style_name: variant.caption for style_name, variant in captions.items()},
                 "checks": {style_name: check.model_dump(mode="json") for style_name, check in checks.items()},
                 "observations": observations,
@@ -168,206 +225,86 @@ class CaptionPipeline:
             "frame_artifact": frame_artifact,
         }
 
-    async def _run_verified_scene_mode(
+    async def _judge_style(
         self,
         *,
-        frame_artifact: FrameExtractionArtifact,
-        transcript_text: str,
-        requested_styles: list[StyleName],
-    ) -> tuple[dict[str, CaptionVariant], dict[str, Any], dict[str, JudgeResult]]:
-        frame_paths = [frame.local_path for frame in frame_artifact.frames]
-        draft = await self.llm_client.generate_text(
-            prompt=_build_verified_scene_description_prompt(transcript_text=transcript_text),
+        style_name: StyleName,
+        observations: dict[str, Any],
+        frame_paths: list[str],
+        candidates: dict[str, str],
+        policy_violations: dict[str, list[str]],
+    ) -> JudgeResult:
+        payload = await self.judge_client.generate_json(
+            system_prompt=load_prompt("judge.txt"),
+            prompt=json.dumps(
+                {
+                    "target_style": style_name,
+                    "style_checklist": _style_checklist_for(style_name),
+                    "focus": [
+                        "Accurate captions.",
+                        "Correct requested style.",
+                        "Specific video details.",
+                        "No major hallucinations.",
+                        "Complete outputs for all clips/styles.",
+                    ],
+                    "observations": observations,
+                    "candidates": candidates,
+                    "deterministic_policy_violations": policy_violations,
+                },
+                indent=2,
+            ),
             image_paths=frame_paths,
-            temperature=0.2,
-            endpoint_path=VISION_ENDPOINT,
+            temperature=_judge_temperature(self.judge_client.config.provider_name, self.judge_client.config.model),
+            response_schema=build_judge_json_schema(),
+            response_schema_name=f"{style_name}_judge",
+            endpoint_path=JUDGE_ENDPOINT,
         )
-        verified_description = await self.llm_client.generate_text(
-            prompt=_build_verified_scene_verification_prompt(draft=draft),
-            image_paths=frame_paths,
-            temperature=0.1,
-            endpoint_path=VISION_ENDPOINT,
-        )
-        self._persist_text("verified_description.txt", verified_description)
-        observations = {
-            "summary": "Verified scene description.",
-            "frame_count": len(frame_paths),
-            "verified_description": verified_description,
-        }
+        result = JudgeResult.model_validate(payload)
+        return _calibrate_judge_result(result, policy_violations)
 
-        captions: dict[str, CaptionVariant] = {}
-        prior_captions: list[str] = []
-        for style_name in requested_styles:
-            prompt = _build_verified_scene_caption_prompt(
-                style_name=style_name,
-                verified_description=verified_description,
-                prior_captions=prior_captions,
-            )
-            raw_caption = await self.llm_client.generate_text(
-                prompt=prompt,
-                temperature=settings.fireworks_temperature if style_name not in CREATIVE_STYLES else settings.fireworks_creative_temperature,
-                endpoint_path=CAPTION_ENDPOINT,
-            )
-            caption = _clean_caption(raw_caption)
-            captions[style_name] = CaptionVariant(style_name=style_name, caption=caption)
-            prior_captions.append(caption)
-
-        checks = await self._run_checks(
-            requested_styles=requested_styles,
-            observations=observations,
-            captions=captions,
-        )
-        return captions, observations, checks
-
-    async def _run_direct_vision_mode(
-        self,
-        *,
-        frame_artifact: FrameExtractionArtifact,
-        transcript_text: str,
-        requested_styles: list[StyleName],
-    ) -> tuple[dict[str, CaptionVariant], dict[str, Any], dict[str, JudgeResult]]:
-        frame_paths = [frame.local_path for frame in frame_artifact.frames]
-        payload = await self.llm_client.generate_json(
-            prompt=_build_direct_vision_prompt(requested_styles=requested_styles, transcript_text=transcript_text),
-            image_paths=frame_paths,
-            temperature=settings.fireworks_creative_temperature,
-            response_schema=build_combined_captions_json_schema(requested_styles),
-            response_schema_name="direct_vision_captions",
-            endpoint_path=VISION_ENDPOINT,
-        )
-        captions = {
-            style_name: CaptionVariant(
-                style_name=style_name,
-                caption=_clean_caption(str(payload.get(style_name) or "")),
-            )
-            for style_name in requested_styles
-        }
-        for style_name in requested_styles:
-            if not captions[style_name].caption:
-                captions[style_name] = CaptionVariant(style_name=style_name, caption=_fallback_caption(style_name, {}))
-
-        observations = {
-            "summary": "Direct vision caption mode; captions generated from sampled frames.",
-            "frame_count": len(frame_paths),
-        }
-        checks = await self._run_checks(
-            requested_styles=requested_styles,
-            observations=observations,
-            captions=captions,
-        )
-        return captions, observations, checks
-
-    async def _run_observation_first_mode(
+    async def _generate_observations(
         self,
         *,
         job_id: str,
-        frame_artifact: FrameExtractionArtifact,
         transcript_text: str,
-        requested_styles: list[StyleName],
-    ) -> tuple[dict[str, CaptionVariant], dict[str, Any], dict[str, JudgeResult]]:
-        frame_paths = [frame.local_path for frame in frame_artifact.frames]
-        observations = await self.llm_client.generate_json(
-            system_prompt=load_prompt("perception_system.txt"),
-            prompt=_build_observation_user_prompt(
-                job_id=job_id,
-                transcript_text=transcript_text,
-                frame_count=len(frame_paths),
-            ),
-            image_paths=frame_paths,
-            temperature=settings.fireworks_temperature,
-            response_schema=build_observation_json_schema(),
-            response_schema_name="observations",
-            endpoint_path=VISION_ENDPOINT,
+        frame_artifact: FrameExtractionArtifact,
+    ) -> dict[str, Any]:
+        base_prompt = _build_observation_user_prompt(
+            job_id=job_id,
+            transcript_text=transcript_text,
+            frame_artifact=frame_artifact,
         )
-        observations = _sanitize_observations(observations)
-        self._persist_json("observations.json", observations)
-
-        async def generate_for_style(style_name: StyleName) -> tuple[StyleName, CaptionVariant]:
-            prompt = load_prompt(STYLE_PROMPTS[style_name])
-            caption_request = {
-                "target_style": style_name,
-                "style_requirement": STYLE_DESCRIPTIONS.get(style_name, ""),
-                "strict_grounding_rules": [
-                    "Use only summary, setting, subjects, key_objects, actions, timeline, visible_text, and audio_or_speech as factual evidence.",
-                    "Never turn anything in uncertainties into a fact.",
-                    "If the exact location, identity, motive, or text is uncertain, use generic wording instead of guessing.",
-                    "Mention the main subject, setting, and primary action when supported.",
-                    "Return only the final caption text.",
-                ],
-                "observations": observations,
-            }
-            temperature = settings.fireworks_creative_temperature if style_name in CREATIVE_STYLES else settings.fireworks_temperature
-            caption = await self.llm_client.generate_text(
-                prompt=json.dumps(caption_request, indent=2),
-                system_prompt=prompt,
-                temperature=temperature,
-                endpoint_path=CAPTION_ENDPOINT,
-            )
-            cleaned = _clean_caption(caption)
-            if _needs_style_retry(style_name, cleaned):
-                cleaned = _clean_caption(
-                    await self.llm_client.generate_text(
-                        prompt=(
-                            json.dumps(caption_request, indent=2)
-                            + "\n\nRewrite the caption. It was too plain for the requested style. "
-                            "Keep the same observed facts, but make the target style obvious. "
-                            "Return only the rewritten caption text."
-                        ),
-                        system_prompt=prompt,
-                        temperature=temperature,
-                        endpoint_path=CAPTION_ENDPOINT,
-                    )
+        image_paths = [frame.local_path for frame in frame_artifact.frames]
+        last_error: Exception | None = None
+        for attempt_index in range(1, 4):
+            prompt = base_prompt
+            temperature = settings.fireworks_temperature
+            if attempt_index > 1:
+                prompt += (
+                    "\n\nSTRICT OUTPUT REQUIREMENTS:\n"
+                    "- Return exactly one valid JSON object.\n"
+                    "- Do not include markdown fences.\n"
+                    "- Do not include trailing commentary.\n"
+                    "- Every required property must be present.\n"
+                    "- Ensure commas and brackets are valid JSON syntax.\n"
                 )
-            return style_name, CaptionVariant(style_name=style_name, caption=cleaned)
-
-        generated = await asyncio.gather(*(generate_for_style(style_name) for style_name in requested_styles))
-        captions = {style_name: variant for style_name, variant in generated}
-
-        checks = await self._run_checks(
-            requested_styles=requested_styles,
-            observations=observations,
-            captions=captions,
-        )
-        return captions, observations, checks
-
-    async def _run_checks(
-        self,
-        *,
-        requested_styles: list[StyleName],
-        observations: dict[str, Any],
-        captions: dict[str, CaptionVariant],
-    ) -> dict[str, JudgeResult]:
-        if not settings.run_judge_checks:
-            return {}
-
-        async def judge_style(style_name: StyleName) -> tuple[StyleName, JudgeResult]:
-            payload = await self.llm_client.generate_json(
-                system_prompt=load_prompt("judge.txt"),
-                prompt=json.dumps(
-                    {
-                        "target_style": style_name,
-                        "observations": observations,
-                        "caption": captions[style_name].caption,
-                    },
-                    indent=2,
-                ),
-                temperature=settings.fireworks_temperature,
-                response_schema=build_judge_json_schema(),
-                response_schema_name=f"{style_name}_judge",
-                endpoint_path=JUDGE_ENDPOINT,
-            )
-            return style_name, JudgeResult.model_validate(payload)
-
-        results = await asyncio.gather(*(judge_style(style_name) for style_name in requested_styles), return_exceptions=True)
-        checks: dict[str, JudgeResult] = {}
-        for result in results:
-            if isinstance(result, Exception):
-                logger.warning("Judge check failed: %s", result)
-                continue
-            style_name, judge = result
-            checks[style_name] = judge
-        self._persist_json("checks.json", {style_name: check.model_dump(mode="json") for style_name, check in checks.items()})
-        return checks
+                temperature = 0.0
+            try:
+                return await self.llm_client.generate_json(
+                    system_prompt=load_prompt("perception_system.txt"),
+                    prompt=prompt,
+                    image_paths=image_paths,
+                    temperature=temperature,
+                    response_schema=build_observation_json_schema(),
+                    response_schema_name=f"observations_attempt_{attempt_index}",
+                    endpoint_path=VISION_ENDPOINT,
+                )
+            except Exception as exc:
+                last_error = exc
+                logger.warning("Observation generation attempt %s failed for %s: %s", attempt_index, job_id, exc)
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("Observation generation failed without an explicit error.")
 
     def _persist_json(self, filename: str, payload: Any) -> None:
         if not self.persist_artifacts:
@@ -382,81 +319,26 @@ class CaptionPipeline:
         (self.artifact_root / filename).write_text(content.strip() + "\n", encoding="utf-8")
 
 
-def _build_observation_user_prompt(*, job_id: str, transcript_text: str, frame_count: int) -> str:
+def _build_observation_user_prompt(*, job_id: str, transcript_text: str, frame_artifact: FrameExtractionArtifact) -> str:
+    frame_lines = "\n".join(
+        f"- {frame.frame_id}: {format_timestamp_label(frame.timestamp)}"
+        for frame in frame_artifact.frames
+    )
     return (
         f"Video id: {job_id}\n"
-        f"Optional transcript:\n{transcript_text or '[none provided]'}\n\n"
-        f"Analyze these {frame_count} sampled frames in chronological order. "
-        "Capture exact visible facts that would help a judge compare captions: "
-        "setting, subjects, colors, countable objects, actions, scene changes, "
-        "visible text, camera movement, and transcript-backed speech."
+        "The attached images are video frames in chronological order.\n"
+        "Treat them as one video sequence. Use the frame labels and timestamps below to track time progression.\n\n"
+        "Frame order:\n"
+        f"{frame_lines}\n\n"
+        f"Optional transcript:\n{transcript_text or '[none provided]'}\n"
     )
 
 
-def _build_direct_vision_prompt(*, requested_styles: list[StyleName], transcript_text: str) -> str:
-    style_lines = "\n".join(f"- {style_name}" for style_name in requested_styles)
-    return (
-        "You are captioning a short video from sampled frames shown in chronological order.\n"
-        "Create one short, accurate caption for each requested style.\n\n"
-        f"Styles:\n{style_lines}\n\n"
-        "Style guide:\n"
-        "formal = factual and neutral.\n"
-        "sarcastic = dry and ironic.\n"
-        "humorous_tech = funny with a software/developer angle.\n"
-        "humorous_non_tech = funny for a general audience, no tech jargon.\n\n"
-        "Keep each caption one sentence. Mention the main subject/action/setting. "
-        "Do not invent details not visible in the frames. Return only valid JSON.\n"
-        f"Transcript if any: {transcript_text or 'none'}\n\n"
-        "JSON shape:\n"
-        + json.dumps({style_name: "caption text" for style_name in requested_styles}, indent=2)
-    )
-
-
-def _build_verified_scene_description_prompt(*, transcript_text: str) -> str:
-    return (
-        "These are frames sampled across a short video clip, in chronological order. "
-        "Note the setting, main subjects, specific action or motion, camera/scene changes, "
-        "and any readable on-screen text. Write 2-4 dense, factual sentences. "
-        "Be specific, do not generalize, and do not mention frames or analysis. "
-        "Only quote visible text if it is large, central, and clearly readable. "
-        "Use generic human descriptions unless a specific identity is directly relevant and visually certain. "
-        f"Optional transcript: {transcript_text or 'none'}"
-    )
-
-
-def _build_verified_scene_verification_prompt(*, draft: str) -> str:
-    return (
-        f"Here is a draft description of these video frames:\n{draft}\n\n"
-        "Check it against the actual frames. If it is accurate and specific, repeat it unchanged. "
-        "If anything is wrong, too generic, or unsupported, correct it. "
-        "Remove exact quoted text, brand names, signs, ethnicity, identity labels, or location claims unless "
-        "they are clearly visible and central in the frames. Prefer generic wording when unsure. "
-        "Output only the final factual description. Do not mention frames, AI, uncertainty, or analysis."
-    )
-
-
-def _build_verified_scene_caption_prompt(
-    *,
-    style_name: StyleName,
-    verified_description: str,
-    prior_captions: list[str] | None = None,
-) -> str:
-    variety_note = ""
-    if prior_captions:
-        variety_note = (
-            "\n\nCaptions already written for this clip in other styles. "
-            "Use a different sentence structure and comedic angle: "
-            + " | ".join(prior_captions)
-        )
-    return (
-        f"{VERIFIED_STYLE_PROMPTS.get(style_name, STYLE_DESCRIPTIONS.get(style_name, 'Match the requested style.'))}\n\n"
-        f"Factual description of the video:\n{verified_description}\n\n"
-        "Write ONE caption, 25 to 60 words, as if you personally watched the video. "
-        "Never mention computer vision, models, detection, frames, prompts, pipelines, or uncertainty. "
-        "Do not invent details beyond the description. Do not quote signs, brands, or identity labels unless "
-        "they are explicitly present in the factual description. Output only the caption text."
-        f"{variety_note}"
-    )
+def format_timestamp_label(timestamp: float) -> str:
+    total_seconds = max(0.0, float(timestamp))
+    minutes = int(total_seconds // 60)
+    seconds = total_seconds - (minutes * 60)
+    return f"{minutes:02d}:{seconds:05.2f}"
 
 
 def _clean_caption(caption: str) -> str:
@@ -474,22 +356,8 @@ def _clean_caption(caption: str) -> str:
 
     if len(text) >= 2 and text[0] == text[-1] and text[0] in {'"', "'"}:
         text = text[1:-1].strip()
-    return text
-
-
-def _sanitize_observations(observations: dict[str, Any]) -> dict[str, Any]:
-    cleaned = dict(observations)
-    uncertainties = cleaned.get("uncertainties")
-    if isinstance(uncertainties, list):
-        cleaned["uncertainties"] = [_sanitize_uncertainty(str(item)) for item in uncertainties]
-    return cleaned
-
-
-def _sanitize_uncertainty(text: str) -> str:
-    lowered = text.lower()
-    if "exact city" in lowered or "exact location" in lowered:
-        if any(marker in lowered for marker in ("suggest", "may be", "might be", "probably", "looks like")):
-            return re.split(r"\bthough\b|\bbut\b|;|,", text, maxsplit=1, flags=re.IGNORECASE)[0].strip() + "."
+    text = re.sub(r"^\s*:\s*", "", text)
+    text = re.sub(r"^\s*(?:[A-Za-z][\w-]*\s*){1,3}:\s+(?=[A-Z])", "", text)
     return text
 
 
@@ -502,15 +370,136 @@ def _needs_style_retry(style_name: StyleName, caption: str) -> bool:
     return False
 
 
-def _fallback_caption(style_name: StyleName, observations: dict[str, Any]) -> str:
-    summary = str(observations.get("summary") or observations.get("setting") or "").strip()
-    subjects = ", ".join(str(item) for item in observations.get("subjects", [])[:2])
-    actions = ", ".join(str(item) for item in observations.get("actions", [])[:2])
-    base = summary or f"The video shows {subjects or 'visible subjects'} with {actions or 'visible activity'}."
+def _candidate_policy_violations(
+    *,
+    style_name: StyleName,
+    candidates: dict[str, str],
+    observations: dict[str, Any],
+) -> dict[str, list[str]]:
+    evidence = json.dumps(observations, ensure_ascii=False).lower()
+    minimum_words, maximum_words = STYLE_WORD_LIMITS[style_name]
+    violations: dict[str, list[str]] = {}
+    for candidate_name, caption in candidates.items():
+        issues: list[str] = []
+        words = re.findall(r"\b[\w'-]+\b", caption)
+        if len(words) < minimum_words or len(words) > maximum_words:
+            issues.append(f"word count {len(words)} is outside {minimum_words}-{maximum_words}")
+        if style_name == "humorous_tech" and _needs_style_retry(style_name, caption):
+            issues.append("no clear computing analogy")
+        if style_name == "humorous_non_tech" and any(_contains_word(caption, word) for word in TECH_STYLE_WORDS):
+            issues.append("contains technical jargon")
+        if re.match(r"^\s*[:;,-]", caption):
+            issues.append("starts with stray punctuation")
+        unsupported_props = [
+            term
+            for term in UNSUPPORTED_PROP_TERMS
+            if _contains_word(caption, term) and term not in evidence
+        ]
+        if unsupported_props:
+            issues.append("unsupported joke prop or event: " + ", ".join(unsupported_props))
+        unsupported_history = [
+            phrase
+            for phrase in UNSUPPORTED_HISTORY_PHRASES
+            if phrase in caption.lower() and phrase not in evidence
+        ]
+        if unsupported_history:
+            issues.append("unsupported prior history: " + ", ".join(unsupported_history))
+        unsupported_numbers = [token for token in NUMBER_TOKEN.findall(caption) if token.lower() not in evidence]
+        if unsupported_numbers:
+            issues.append("unsupported numeric precision: " + ", ".join(unsupported_numbers))
+        violations[candidate_name] = issues
+    return violations
+
+
+def _contains_word(text: str, word: str) -> bool:
+    return re.search(rf"\b{re.escape(word)}\w*\b", text, re.IGNORECASE) is not None
+
+
+def _calibrate_judge_result(
+    result: JudgeResult,
+    policy_violations: dict[str, list[str]],
+) -> JudgeResult:
+    calibrated: dict[str, CandidateJudgeEvaluation] = {}
+    for candidate_name in ("candidate_1", "candidate_2"):
+        evaluation = getattr(result, candidate_name)
+        score = min(evaluation.accuracy_score, evaluation.style_score)
+        if evaluation.accuracy.lower() != "pass" or evaluation.style.lower() != "pass":
+            score = min(score, 0.69)
+        score = max(0.0, score - (0.08 * len(policy_violations.get(candidate_name, []))))
+        calibrated[candidate_name] = evaluation.model_copy(update={"combined_score": round(score, 4)})
+    selected_candidate = max(calibrated, key=lambda name: calibrated[name].combined_score)
+    return result.model_copy(
+        update={
+            "selected_candidate": selected_candidate,
+            "candidate_1": calibrated["candidate_1"],
+            "candidate_2": calibrated["candidate_2"],
+        }
+    )
+
+
+def _build_caption_candidates_user_prompt(
+    style_name: StyleName,
+    *,
+    prior_candidates: dict[str, str] | None = None,
+    prior_judge_result: JudgeResult | None = None,
+) -> str:
+    base_prompt = (
+        f"Generate two distinct {style_name} caption candidates for this video.\n"
+        "Return strict JSON only in this shape:\n"
+        '{\n  "candidate_1": "caption text",\n  "candidate_2": "caption text"\n}\n'
+        "Candidate 1 must be conservative and closely match the retired reference style.\n"
+        "Candidate 2 may be more creative, but must remain equally grounded and concise.\n"
+        "Name the visible scene before adding style. Use only facts in caption_facts or clearly repeated high-confidence observations.\n"
+        "Do not invent exact counts, seconds, percentages, signs, brands, locations, intentions, or technical events.\n"
+        "A joke may add metaphorical attitude, but never a new physical object, destination, prior event, or unseen action.\n"
+        "Every concrete noun and physical action in either caption must be supported by the observations.\n"
+        "Avoid making camera movement, filming, or model behavior the main joke.\n"
+        "Both candidates must be accurate, complete, and stylistically valid.\n"
+        "Caption values must start with words, not labels or leading punctuation.\n"
+        "Do not return explanations."
+    )
+    if not prior_candidates or not prior_judge_result:
+        return base_prompt
+    selected_eval = _selected_evaluation(prior_judge_result)
+    return (
+        base_prompt
+        + "\n\nPrevious candidates:\n"
+        + json.dumps(prior_candidates, indent=2, ensure_ascii=False)
+        + "\n\nJudge feedback:\n"
+        + json.dumps(prior_judge_result.model_dump(mode="json"), indent=2, ensure_ascii=False)
+        + f"\n\nThe selected candidate scored below {settings.caption_acceptance_threshold:.2f} calibrated quality. Generate two new candidates that fix every accuracy and style issue."
+        + "\nUse the previous candidates only as negative or partial references. Do not repeat them."
+        + "\nRemove unsupported details instead of paraphrasing them. Prefer a simpler caption when uncertain."
+        + f"\nTarget both accuracy and style scores of at least {settings.caption_acceptance_threshold:.2f}. The last winning candidate scored {selected_eval.combined_score:.2f}."
+    )
+
+
+def _style_checklist_for(style_name: StyleName) -> str:
     if style_name == "formal":
-        return base
+        return "Formal: clear and professional."
     if style_name == "sarcastic":
-        return f"{base} A very serious moment for ordinary visual evidence."
+        return "Sarcastic: sarcastic but still accurate."
     if style_name == "humorous_tech":
-        return f"{base} The scene ships its visual update with no rollback needed."
-    return f"{base} It is doing its best to make everyday motion look eventful."
+        return "Humorous tech: tech humor plus real video details."
+    return "humorous_non_tech: funny, everyday humour with no technical jargon."
+
+
+def _selected_evaluation(judge_result: JudgeResult):
+    return getattr(judge_result, judge_result.selected_candidate)
+
+
+def _judge_passes(evaluation: CandidateJudgeEvaluation) -> bool:
+    return (
+        evaluation.accuracy.lower() == "pass"
+        and evaluation.style.lower() == "pass"
+        and evaluation.accuracy_score >= settings.caption_acceptance_threshold
+        and evaluation.style_score >= settings.caption_acceptance_threshold
+        and evaluation.combined_score >= settings.caption_acceptance_threshold
+    )
+
+
+def _judge_temperature(provider_name: str, model_name: str) -> float | None:
+    normalized_provider = (provider_name or "").strip().lower()
+    if normalized_provider == "openrouter":
+        return None
+    return settings.fireworks_temperature

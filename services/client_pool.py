@@ -22,6 +22,7 @@ def get_fireworks_client() -> FireworksClient:
             proxy_url=settings.fireworks_proxy_url,
             proxy_token=settings.fireworks_proxy_token,
             timeout_seconds=settings.fireworks_timeout_seconds,
+            queue_timeout_seconds=settings.fireworks_queue_timeout_seconds,
             max_retries=settings.fireworks_max_retries,
             reasoning_effort=settings.fireworks_reasoning_effort,
             vision_max_tokens=settings.fireworks_vision_max_tokens,
@@ -44,6 +45,7 @@ def get_llm_client() -> FireworksClient:
                 proxy_url=settings.openrouter_proxy_url,
                 proxy_token=settings.openrouter_proxy_token,
                 timeout_seconds=settings.fireworks_timeout_seconds,
+                queue_timeout_seconds=settings.fireworks_queue_timeout_seconds,
                 max_retries=settings.fireworks_max_retries,
                 reasoning_effort=settings.fireworks_reasoning_effort,
                 vision_max_tokens=settings.fireworks_vision_max_tokens,
@@ -54,6 +56,50 @@ def get_llm_client() -> FireworksClient:
         _register_client(client)
         return client
     return get_fireworks_client()
+
+
+def get_judge_client() -> FireworksClient:
+    if settings.judge_llm_provider == "openrouter":
+        client = FireworksClient(
+            FireworksConfig(
+                provider_name="openrouter",
+                api_key=settings.openrouter_api_key or "",
+                model=settings.judge_model or settings.openrouter_model,
+                base_url=settings.openrouter_base_url,
+                proxy_url=settings.openrouter_proxy_url,
+                proxy_token=settings.openrouter_proxy_token,
+                timeout_seconds=settings.fireworks_timeout_seconds,
+                queue_timeout_seconds=settings.fireworks_queue_timeout_seconds,
+                max_retries=settings.fireworks_max_retries,
+                reasoning_effort=settings.fireworks_reasoning_effort,
+                vision_max_tokens=settings.fireworks_vision_max_tokens,
+                caption_max_tokens=settings.fireworks_caption_max_tokens,
+                judge_max_tokens=settings.fireworks_judge_max_tokens,
+            )
+        )
+        _register_client(client)
+        return client
+    if settings.judge_llm_provider == "fireworks":
+        client = FireworksClient(
+            FireworksConfig(
+                provider_name="fireworks",
+                api_key=settings.fireworks_api_key or "",
+                model=settings.judge_model or settings.fireworks_model,
+                base_url=settings.fireworks_base_url,
+                proxy_url=settings.fireworks_proxy_url,
+                proxy_token=settings.fireworks_proxy_token,
+                timeout_seconds=settings.fireworks_timeout_seconds,
+                queue_timeout_seconds=settings.fireworks_queue_timeout_seconds,
+                max_retries=settings.fireworks_max_retries,
+                reasoning_effort=settings.fireworks_reasoning_effort,
+                vision_max_tokens=settings.fireworks_vision_max_tokens,
+                caption_max_tokens=settings.fireworks_caption_max_tokens,
+                judge_max_tokens=settings.fireworks_judge_max_tokens,
+            )
+        )
+        _register_client(client)
+        return client
+    raise ValueError("JUDGE_LLM_PROVIDER must be 'fireworks' or 'openrouter'")
 
 
 def close_pooled_async_clients() -> None:

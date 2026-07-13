@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal, Sequence
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -9,18 +9,25 @@ StyleName = Literal["formal", "sarcastic", "humorous_tech", "humorous_non_tech"]
 STYLE_ORDER: tuple[StyleName, ...] = ("formal", "sarcastic", "humorous_tech", "humorous_non_tech")
 
 
+class TimelineObservation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    timestamp: str = ""
+    observation: str = ""
+
+
 class ObservationResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    summary: str = ""
+    scene_summary: str = ""
     setting: str = ""
     subjects: list[str] = Field(default_factory=list)
-    key_objects: list[str] = Field(default_factory=list)
     actions: list[str] = Field(default_factory=list)
-    timeline: list[str] = Field(default_factory=list)
-    visible_text: list[str] = Field(default_factory=list)
-    audio_or_speech: list[str] = Field(default_factory=list)
-    uncertainties: list[str] = Field(default_factory=list)
+    key_objects: list[str] = Field(default_factory=list)
+    timeline: list[TimelineObservation] = Field(default_factory=list)
+    temporal_highlights: list[str] = Field(default_factory=list)
+    camera: str = ""
+    caption_facts: list[str] = Field(default_factory=list)
 
 
 class CaptionVariant(BaseModel):
@@ -30,12 +37,30 @@ class CaptionVariant(BaseModel):
     caption: str
 
 
-class JudgeResult(BaseModel):
+class CaptionCandidates(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    candidate_1: str
+    candidate_2: str
+
+
+class CandidateJudgeEvaluation(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     accuracy: str
-    tone: str
+    style: str
+    accuracy_score: float = Field(ge=0.0, le=1.0)
+    style_score: float = Field(ge=0.0, le=1.0)
+    combined_score: float = Field(ge=0.0, le=1.0)
     notes: str = ""
+
+
+class JudgeResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    selected_candidate: str
+    candidate_1: CandidateJudgeEvaluation
+    candidate_2: CandidateJudgeEvaluation
 
 
 def build_observation_json_schema() -> dict[str, object]:
@@ -43,49 +68,50 @@ def build_observation_json_schema() -> dict[str, object]:
         "type": "object",
         "additionalProperties": False,
         "properties": {
-            "summary": {"type": "string"},
+            "scene_summary": {"type": "string"},
             "setting": {"type": "string"},
             "subjects": {"type": "array", "items": {"type": "string"}},
-            "key_objects": {"type": "array", "items": {"type": "string"}},
             "actions": {"type": "array", "items": {"type": "string"}},
-            "timeline": {"type": "array", "items": {"type": "string"}},
-            "visible_text": {"type": "array", "items": {"type": "string"}},
-            "audio_or_speech": {"type": "array", "items": {"type": "string"}},
-            "uncertainties": {"type": "array", "items": {"type": "string"}},
+            "key_objects": {"type": "array", "items": {"type": "string"}},
+            "timeline": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "timestamp": {"type": "string"},
+                        "observation": {"type": "string"},
+                    },
+                    "required": ["timestamp", "observation"],
+                },
+            },
+            "temporal_highlights": {"type": "array", "items": {"type": "string"}},
+            "camera": {"type": "string"},
+            "caption_facts": {"type": "array", "items": {"type": "string"}},
         },
         "required": [
-            "summary",
+            "scene_summary",
             "setting",
             "subjects",
-            "key_objects",
             "actions",
+            "key_objects",
             "timeline",
-            "visible_text",
-            "audio_or_speech",
-            "uncertainties",
+            "temporal_highlights",
+            "camera",
+            "caption_facts",
         ],
     }
 
 
-def build_caption_variant_json_schema(style_name: StyleName) -> dict[str, object]:
+def build_caption_candidates_json_schema() -> dict[str, object]:
     return {
         "type": "object",
         "additionalProperties": False,
         "properties": {
-            "style_name": {"type": "string", "enum": [style_name]},
-            "caption": {"type": "string"},
+            "candidate_1": {"type": "string"},
+            "candidate_2": {"type": "string"},
         },
-        "required": ["style_name", "caption"],
-    }
-
-
-def build_combined_captions_json_schema(styles: Sequence[StyleName]) -> dict[str, object]:
-    properties = {style_name: {"type": "string"} for style_name in styles}
-    return {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": properties,
-        "required": list(properties.keys()),
+        "required": ["candidate_1", "candidate_2"],
     }
 
 
@@ -94,9 +120,33 @@ def build_judge_json_schema() -> dict[str, object]:
         "type": "object",
         "additionalProperties": False,
         "properties": {
-            "accuracy": {"type": "string", "enum": ["pass", "fail"]},
-            "tone": {"type": "string", "enum": ["pass", "fail"]},
-            "notes": {"type": "string"},
+            "selected_candidate": {"type": "string", "enum": ["candidate_1", "candidate_2"]},
+            "candidate_1": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "accuracy": {"type": "string", "enum": ["pass", "fail"]},
+                    "style": {"type": "string", "enum": ["pass", "fail"]},
+                    "accuracy_score": {"type": "number"},
+                    "style_score": {"type": "number"},
+                    "combined_score": {"type": "number"},
+                    "notes": {"type": "string"},
+                },
+                "required": ["accuracy", "style", "accuracy_score", "style_score", "combined_score", "notes"],
+            },
+            "candidate_2": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "accuracy": {"type": "string", "enum": ["pass", "fail"]},
+                    "style": {"type": "string", "enum": ["pass", "fail"]},
+                    "accuracy_score": {"type": "number"},
+                    "style_score": {"type": "number"},
+                    "combined_score": {"type": "number"},
+                    "notes": {"type": "string"},
+                },
+                "required": ["accuracy", "style", "accuracy_score", "style_score", "combined_score", "notes"],
+            },
         },
-        "required": ["accuracy", "tone", "notes"],
+        "required": ["selected_candidate", "candidate_1", "candidate_2"],
     }
